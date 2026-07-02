@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vale Transporte — BRASAS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy-900:#0a1628;--navy-800:#0f2035;--navy-700:#162d4a;
+  --navy-600:#1e3a5f;--navy-500:#2a4d76;--navy-400:#3d6b99;
+  --navy-300:#5a8aba;--navy-200:#89afd4;--navy-100:#c0d4e9;
+  --navy-50:#e8eff7;
+  --success-600:#15803d;--success-500:#22c55e;--success-100:#dcfce7;
+  --danger-600:#dc2626;--danger-500:#ef4444;--danger-100:#fee2e2;
+  --warning-500:#f59e0b;
+  --white:#fff;
+  --gray-50:#f8fafc;--gray-100:#f1f5f9;--gray-200:#e2e8f0;
+  --gray-300:#cbd5e1;--gray-400:#94a3b8;--gray-500:#64748b;--gray-600:#475569;
+  --font:'DM Sans',-apple-system,sans-serif;
+  --radius:14px;
+  --shadow-sm:0 1px 3px rgba(10,22,40,.06);
+  --shadow-md:0 4px 16px rgba(10,22,40,.1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--gray-100);color:var(--navy-800);min-height:100vh;line-height:1.5}
+
+/* ── LOADING / ERROR SCREENS ────────────────────────── */
+.overlay {
+  position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(135deg,var(--navy-900) 0%,var(--navy-700) 60%,var(--navy-600) 100%);
+  display:flex;align-items:center;justify-content:center;
+}
+.spinner {
+  width:44px;height:44px;
+  border:3px solid rgba(255,255,255,.15);border-top-color:#fff;
+  border-radius:50%;animation:spin .75s linear infinite;margin-bottom:4px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.overlay p  {color:var(--navy-200);font-size:.9rem;margin-top:8px}
+.error-txt  {color:#fca5a5;font-weight:600;font-size:.95rem;max-width:360px;text-align:center;padding:0 16px}
+
+/* ── MAIN APP ──────────────────────────────────────────────── */
+#screenMain {display:none;flex-direction:column;min-height:100vh}
+
+/* HEADER */
+.app-header {
+  background:var(--navy-900);
+  border-bottom:1px solid rgba(255,255,255,.06);
+  padding:14px 32px;
+  display:flex;align-items:center;gap:20px;
+  box-shadow:0 2px 16px rgba(10,22,40,.35);
+  position:sticky;top:0;z-index:100;
+}
+.header-brand {display:flex;align-items:center;gap:12px}
+.header-brand-icon {
+  width:38px;height:38px;border-radius:10px;
+  background:linear-gradient(135deg,var(--navy-600),var(--navy-400));
+  display:flex;align-items:center;justify-content:center;font-size:1rem;
+}
+.header-brand h1 {font-size:1rem;font-weight:700;color:#fff;letter-spacing:-.01em}
+.header-brand p  {font-size:.7rem;color:var(--navy-300);margin-top:1px}
+.header-right {margin-left:auto;display:flex;align-items:center;gap:10px}
+.hub-back-btn {
+  display:flex;align-items:center;gap:5px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  border-radius:8px;padding:6px 13px;
+  font-family:var(--font);font-size:.8rem;font-weight:600;color:var(--navy-200);
+  text-decoration:none;cursor:pointer;transition:background .15s,color .15s;white-space:nowrap;
+}
+.hub-back-btn:hover{background:rgba(255,255,255,.14);color:#fff}
+.period-pill {
+  display:flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  border-radius:8px;padding:7px 14px;
+}
+.period-pill span {font-size:.82rem;color:var(--navy-200);font-weight:500}
+.period-pill strong {font-size:.82rem;color:#fff;font-weight:700}
+.status-badge {
+  padding:5px 12px;border-radius:20px;
+  font-size:.7rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+}
+.badge-open   {background:rgba(34,197,94,.18);color:#4ade80;border:1px solid rgba(34,197,94,.25)}
+.badge-locked {background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.2)}
+.user-badge {
+  display:flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+  border-radius:8px;padding:6px 14px;
+}
+.user-badge-name {font-size:.82rem;font-weight:600;color:#fff}
+.user-badge-unit {font-size:.7rem;color:var(--navy-300)}
+
+/* BODY */
+.app-body {flex:1;padding:28px 32px;max-width:1440px;width:100%;margin:0 auto}
+
+/* STAT PILLS */
+.stat-row {display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+.stat-card {
+  display:inline-flex;align-items:center;gap:7px;
+  background:var(--white);border:1px solid var(--gray-200);
+  border-radius:999px;padding:9px 18px;box-shadow:var(--shadow-sm);
+}
+.stat-label {font-size:.67rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--gray-400)}
+.stat-value {font-size:.92rem;font-weight:700;color:var(--navy-800)}
+
+/* TABS PANEL */
+.tabs-panel {
+  background:var(--white);border:1px solid var(--gray-200);
+  border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm);
+}
+.tab-panel {display:none}
+.tab-panel.active {display:block}
+
+/* VIEW SELECTOR (pílulas, acima do card de filtros) */
+.tabs-nav {display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.tab-btn {
+  padding:10px 18px;border:1.5px solid var(--gray-200);border-radius:10px;
+  background:var(--white);cursor:pointer;
+  font-family:var(--font);font-size:.87rem;font-weight:700;color:var(--navy-700);
+  transition:background .15s,color .15s,border-color .15s;
+}
+.tab-btn:hover {border-color:var(--navy-300)}
+.tab-btn.active {background:var(--navy-900);border-color:var(--navy-900);color:#fff}
+
+/* TABLE CARD HEADER (título + subtítulo + contador de registros) */
+.table-card-header {
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+  padding:18px 20px;border-bottom:1px solid var(--gray-200);
+}
+.table-card-title {font-size:.98rem;font-weight:700;color:var(--navy-800)}
+.table-card-sub {font-size:.78rem;color:var(--gray-400);margin-top:2px}
+.records-pill {
+  background:var(--gray-100);color:var(--gray-600);border-radius:999px;
+  font-size:.78rem;font-weight:700;padding:5px 14px;white-space:nowrap;
+}
+
+/* ── SELECTOR BAR ──────────────────────────────────────────── */
+.selector-label {
+  display:block;font-size:.67rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--gray-400);margin-bottom:6px;
+}
+.emp-dropdown {
+  min-width:300px;padding:9px 12px;
+  border:1.5px solid var(--gray-200);border-radius:8px;
+  font-family:var(--font);font-size:.88rem;color:var(--navy-800);
+  background:var(--white);outline:none;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s;
+}
+.emp-dropdown:focus {border-color:var(--navy-500);box-shadow:0 0 0 3px rgba(42,77,118,.12)}
+.emp-dropdown:disabled {background:var(--gray-100);color:var(--gray-400);cursor:not-allowed}
+
+/* ── MULTISELECT DROPDOWN (unidades/ano/mês) ──────────────────────── */
+.multiselect {position:relative}
+.multiselect-btn {
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-width:200px;text-align:left;
+}
+.multiselect-caret {font-size:.65rem;color:var(--gray-400)}
+.multiselect-panel {
+  display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:20;
+  min-width:220px;max-height:240px;overflow-y:auto;
+  background:var(--white);border:1.5px solid var(--gray-200);border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.14);padding:6px;
+}
+.multiselect-panel.open {display:block}
+.multiselect-option {
+  display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;
+  font-size:.85rem;color:var(--navy-800);cursor:pointer;
+}
+.multiselect-option:hover {background:var(--gray-50)}
+.multiselect-option input {cursor:pointer;margin:0}
+
+/* ── NO SELECTION HINT ─────────────────────────────────────── */
+.no-sel-hint {
+  text-align:center;padding:52px 24px;color:var(--gray-400);
+  font-size:.88rem;font-style:italic;
+}
+
+/* NUMBER INPUTS */
+input[type=number] {
+  padding:6px 8px;
+  border:1px solid var(--gray-200);border-radius:7px;
+  text-align:center;font-family:var(--font);font-size:.84rem;color:var(--navy-800);
+  background:var(--white);transition:border-color .15s,box-shadow .15s;
+  -moz-appearance:textfield;
+}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
+input[type=number]:focus {
+  outline:none;border-color:var(--navy-500);
+  box-shadow:0 0 0 3px rgba(42,77,118,.12);
+}
+input[type=number]:disabled {
+  background:var(--gray-100);color:var(--gray-300);
+  border-color:var(--gray-200);cursor:not-allowed;
+}
+
+/* FOOTER */
+.app-footer {
+  padding:20px 32px;max-width:1440px;width:100%;margin:0 auto;
+  display:flex;align-items:center;justify-content:flex-end;gap:14px;
+}
+.save-btn {
+  background:var(--navy-800);color:#fff;border:none;
+  padding:11px 28px;border-radius:8px;font-family:var(--font);
+  font-size:.9rem;font-weight:700;cursor:pointer;letter-spacing:.01em;
+  transition:background .15s;
+}
+.save-btn:hover:not(:disabled){background:var(--navy-600)}
+.save-btn:disabled{opacity:.45;cursor:not-allowed}
+.status-msg {
+  font-size:.84rem;font-weight:600;padding:8px 16px;border-radius:8px;display:none;
+}
+.status-msg.success{background:var(--success-100);color:var(--success-600);display:block}
+.status-msg.error  {background:var(--danger-100);color:var(--danger-600);display:block}
+.status-msg.saving {background:var(--navy-50);color:var(--navy-600);display:block}
+.lock-notice {
+  background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);
+  border-radius:8px;padding:9px 16px;color:var(--danger-600);
+  font-size:.82rem;font-weight:600;margin-right:auto;
+}
+
+/* FILTER CARD (card branco independente, acima das pills e da tabela) */
+.filter-card {
+  background:var(--white);border:1px solid var(--gray-200);
+  border-radius:var(--radius);padding:18px 20px;
+  margin-bottom:18px;box-shadow:var(--shadow-sm);
+}
+.filter-row {display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end}
+.filter-hint {font-size:.72rem;color:var(--gray-400);margin-top:4px}
+.clear-filters-btn {
+  margin-left:auto;
+  background:var(--white);border:1.5px solid var(--gray-200);border-radius:8px;
+  padding:9px 16px;font-family:var(--font);font-size:.85rem;font-weight:600;
+  color:var(--gray-500);cursor:pointer;transition:border-color .15s,color .15s;
+}
+.clear-filters-btn:hover {border-color:var(--navy-300);color:var(--navy-700)}
+
+/* ── TABELA DE LANÇAMENTOS (estilo relatório, bordas leves) ───── */
+.hist-section {padding:20px;overflow-x:auto}
+.hist-table {
+  width:100%;border-collapse:collapse;font-size:.83rem;margin-bottom:16px;
+}
+.hist-table th, .hist-table td {
+  padding:10px 14px;text-align:center;
+  border-bottom:1px solid var(--gray-200);
+}
+.hist-table th {
+  background:none;color:var(--gray-400);font-weight:700;
+  font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;
+  border-bottom:2px solid var(--gray-200);
+}
+.hist-table td:first-child, .hist-table th:first-child {text-align:left}
+.hist-table td:nth-child(6), .hist-table th:nth-child(6) {text-align:left}
+.hist-table tbody tr:hover {background:var(--gray-50)}
+
+.entry-table td {padding:6px 8px}
+.entry-table select.vt-tipo-sel {
+  min-width:150px;padding:5px 8px;
+  border:1px solid var(--gray-200);border-radius:6px;
+  font-family:var(--font);font-size:.8rem;color:var(--navy-800);
+  background:var(--white);outline:none;cursor:pointer;
+}
+.entry-table select.vt-tipo-sel:disabled {background:var(--gray-100);color:var(--gray-400);cursor:not-allowed}
+.entry-table input.vt-valor {width:68px}
+.entry-table input.vt-qtd   {width:52px}
+.vt-calc {font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--navy-700);font-weight:600}
+
+.add-row-bar {
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:16px 20px;border-top:1px solid var(--gray-200);background:var(--gray-50);
+}
+.add-row-label {font-size:.84rem;font-weight:600;color:var(--gray-600)}
+
+/* ── ADMINISTRAÇÃO (liberações temporárias) ──────────────────── */
+.liber-card {
+  background:var(--white);border:1px solid var(--gray-200);border-radius:12px;
+  padding:20px;max-width:560px;
+}
+.liber-card-title {
+  font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--gray-400);margin-bottom:14px;
+}
+.liber-form {display:flex;gap:10px;flex-wrap:wrap}
+.liber-input {
+  flex:1;min-width:220px;padding:10px 14px;
+  border:1.5px solid var(--gray-200);border-radius:8px;
+  font-family:var(--font);font-size:.88rem;color:var(--navy-800);outline:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+.liber-input:focus {border-color:var(--navy-500);box-shadow:0 0 0 3px rgba(42,77,118,.12)}
+.liber-status {font-size:.82rem;font-weight:600;margin-top:10px}
+.liber-status.error   {color:var(--danger-600)}
+.liber-status.success {color:var(--success-600)}
+.status-pill {padding:4px 12px;border-radius:20px;font-size:.72rem;font-weight:700;display:inline-block}
+.status-pill.ativa    {background:var(--success-100);color:var(--success-600)}
+.status-pill.expirada {background:var(--gray-100);color:var(--gray-400)}
+
+@media(max-width:900px){
+  .app-header{padding:12px 16px}
+  .app-body,.app-footer{padding-left:16px;padding-right:16px}
+  .header-right .period-pill{display:none}
+  .emp-dropdown{min-width:220px}
+}
+</style>
+</head>
+<body>
+
+<!-- ── LOADING ───────────────────────────────────────────── -->
+<div id="screenLoading" class="overlay" style="display:none">
+  <div class="spinner"></div>
+  <p>Carregando...</p>
+</div>
+
+
+<!-- ── ERRO ─────────────────────────────────────────────── -->
+<div id="screenError" class="overlay" style="display:none">
+  <div class="error-txt" id="errorMsg"></div>
+</div>
+
+<!-- ── MAIN APP ──────────────────────────────────────────── -->
+<div id="screenMain">
+
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="header-brand-icon">🚌</div>
+      <div>
+        <h1>Vale Transporte</h1>
+        <p>BRASAS BI</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <button id="admPageBtn" class="hub-back-btn" type="button" style="display:none" onclick="switchTab('admpage')">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 10a2 2 0 100-4 2 2 0 000 4z" stroke="currentColor" stroke-width="1.5"/><path d="M13 8.6v-1.2l1.3-1-1-1.7-1.5.4a4.9 4.9 0 00-1-.6l-.3-1.5H8.5l-.3 1.5c-.36.14-.7.34-1 .6l-1.5-.4-1 1.7L6 7.4v1.2l-1.3 1 1 1.7 1.5-.4c.3.26.64.46 1 .6l.3 1.5h1.99l.3-1.5c.36-.14.7-.34 1-.6l1.5.4 1-1.7-1.3-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        Liberação
+      </button>
+      <a id="hubBackBtn" class="hub-back-btn" href="#" target="_top">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Hub
+      </a>
+      <div class="period-pill">
+        <span>Período</span>
+        <strong id="hPeriodo">—</strong>
+      </div>
+      <span id="hBadge" class="status-badge" style="display:none"></span>
+      <div class="user-badge">
+        <div>
+          <div class="user-badge-name" id="hNome">—</div>
+          <div class="user-badge-unit" id="hUnidade">—</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-body">
+
+    <!-- Seletor de visão -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" data-tab="admin" onclick="switchTab('admin')">Administrativo</button>
+      <button class="tab-btn" data-tab="docente" onclick="switchTab('docente')">Docente</button>
+    </div>
+
+    <!-- Filtros: unidade (dropdown multi-seleção, visível só com mais de 1) + ano + mês -->
+    <div class="filter-card">
+      <div class="filter-row">
+        <div id="unitFilterWrap" style="display:none">
+          <label class="selector-label">Unidades</label>
+          <div class="multiselect" id="unitFilterMulti">
+            <button type="button" class="emp-dropdown multiselect-btn" id="unitFilterBtn" onclick="toggleDropdown(event,'unitFilterPanel')">
+              <span id="unitFilterBtnLabel">Todas as unidades</span>
+              <span class="multiselect-caret">&#9662;</span>
+            </button>
+            <div class="multiselect-panel" id="unitFilterPanel"></div>
+          </div>
+          <div class="filter-hint">Nenhuma selecionada = todas</div>
+        </div>
+        <div>
+          <label class="selector-label">Ano</label>
+          <div class="multiselect" id="yearFilterMulti">
+            <button type="button" class="emp-dropdown multiselect-btn" id="yearFilterBtn" style="min-width:140px" onclick="toggleDropdown(event,'yearFilterPanel')">
+              <span id="yearFilterBtnLabel">Todos os anos</span>
+              <span class="multiselect-caret">&#9662;</span>
+            </button>
+            <div class="multiselect-panel" id="yearFilterPanel"></div>
+          </div>
+        </div>
+        <div>
+          <label class="selector-label">Mês</label>
+          <div class="multiselect" id="monthFilterMulti">
+            <button type="button" class="emp-dropdown multiselect-btn" id="monthFilterBtn" style="min-width:180px" onclick="toggleDropdown(event,'monthFilterPanel')">
+              <span id="monthFilterBtnLabel">Todos os meses</span>
+              <span class="multiselect-caret">&#9662;</span>
+            </button>
+            <div class="multiselect-panel" id="monthFilterPanel"></div>
+          </div>
+        </div>
+        <button type="button" class="clear-filters-btn" onclick="clearFilters()">Limpar filtros</button>
+      </div>
+    </div>
+
+    <!-- Stat pills -->
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-label">Unidade</div>
+        <div class="stat-value" id="sUnidade">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Período de referência</div>
+        <div class="stat-value" id="sPeriodo">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total de funcionários</div>
+        <div class="stat-value" id="sTotal">—</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs-panel">
+
+      <!-- ── Administrativo ── -->
+      <div id="tabAdmin" class="tab-panel active">
+        <div class="table-card-header">
+          <div>
+            <div class="table-card-title">Administrativo</div>
+            <div class="table-card-sub">Vale transporte previsto por colaborador (ida e volta)</div>
+          </div>
+          <span class="records-pill" id="admRecordsPill">0 registros</span>
+        </div>
+        <div id="adminNoSel" class="no-sel-hint" style="display:none">Nenhum lançamento com os filtros atuais. Use "Adicionar" abaixo.</div>
+        <div class="hist-section">
+          <table class="hist-table entry-table">
+            <thead>
+              <tr>
+                <th rowspan="2">Unidade</th><th rowspan="2">Mês</th><th rowspan="2">Ano</th>
+                <th rowspan="2">Matrícula</th><th rowspan="2">CPF</th><th rowspan="2">Funcionário</th>
+                <th colspan="3">Ida</th><th colspan="3">Volta</th>
+                <th rowspan="2">Total</th><th rowspan="2">Dias Trab.</th><th rowspan="2">Valor Diário</th>
+                <th rowspan="2">Valor Jaé</th><th rowspan="2">Valor RioCard</th>
+              </tr>
+              <tr><th>Tipo</th><th>Valor</th><th>Qtd</th><th>Tipo</th><th>Valor</th><th>Qtd</th></tr>
+            </thead>
+            <tbody id="adminTableBody"></tbody>
+          </table>
+        </div>
+        <div id="adminAddBar" class="add-row-bar">
+          <select id="adminAddUnit" class="emp-dropdown" style="min-width:180px" onchange="populateAddEmpDropdown('admin')"></select>
+          <select id="adminAddEmp" class="emp-dropdown" style="min-width:260px"></select>
+          <button class="save-btn" onclick="addRow('admin')">+ Adicionar</button>
+        </div>
+      </div>
+
+      <!-- ── Docente ── -->
+      <div id="tabDocente" class="tab-panel">
+        <div class="table-card-header">
+          <div>
+            <div class="table-card-title">Docente</div>
+            <div class="table-card-sub">Vale transporte previsto por colaborador (ida e volta)</div>
+          </div>
+          <span class="records-pill" id="docRecordsPill">0 registros</span>
+        </div>
+        <div id="docenteNoSel" class="no-sel-hint" style="display:none">Nenhum lançamento com os filtros atuais. Use "Adicionar" abaixo.</div>
+        <div class="hist-section">
+          <table class="hist-table entry-table">
+            <thead>
+              <tr>
+                <th rowspan="2">Unidade</th><th rowspan="2">Mês</th><th rowspan="2">Ano</th>
+                <th rowspan="2">Matrícula</th><th rowspan="2">CPF</th><th rowspan="2">Funcionário</th>
+                <th colspan="3">Ida</th><th colspan="3">Volta</th>
+                <th rowspan="2">Total</th><th rowspan="2">Dias Trab.</th><th rowspan="2">Valor Diário</th>
+                <th rowspan="2">Valor Jaé</th><th rowspan="2">Valor RioCard</th>
+              </tr>
+              <tr><th>Tipo</th><th>Valor</th><th>Qtd</th><th>Tipo</th><th>Valor</th><th>Qtd</th></tr>
+            </thead>
+            <tbody id="docenteTableBody"></tbody>
+          </table>
+        </div>
+        <div id="docenteAddBar" class="add-row-bar">
+          <select id="docenteAddUnit" class="emp-dropdown" style="min-width:180px" onchange="populateAddEmpDropdown('docente')"></select>
+          <select id="docenteAddEmp" class="emp-dropdown" style="min-width:260px"></select>
+          <button class="save-btn" onclick="addRow('docente')">+ Adicionar</button>
+        </div>
+      </div>
+
+      <!-- ── Administração (só admin) ── -->
+      <div id="tabAdmPage" class="tab-panel">
+        <div class="hist-section">
+          <div class="liber-card">
+            <div class="liber-card-title">Nova Liberação (24h)</div>
+            <div class="liber-form">
+              <input type="email" id="liberEmailInput" class="liber-input" placeholder="e-mail do usuário" onkeydown="if(event.key==='Enter') criarLiberacao()">
+              <button class="save-btn" onclick="criarLiberacao()">Liberar 24h</button>
+            </div>
+            <div id="liberStatus" class="liber-status"></div>
+          </div>
+
+          <table class="hist-table" style="margin-top:24px">
+            <thead>
+              <tr><th>E-mail</th><th>Liberado por</th><th>Expira em</th><th>Status</th></tr>
+            </thead>
+            <tbody id="liberacoesBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </div><!-- /app-body -->
+
+  <footer class="app-footer">
+    <span id="statusMsg" class="status-msg"></span>
+    <div id="lockNotice" class="lock-notice" style="display:none">
+      Prazo encerrado — formulário somente para visualização
+    </div>
+    <button id="saveBtn" class="save-btn" onclick="saveData()" style="display:none">
+      Salvar dados
+    </button>
+  </footer>
+
+</div><!-- /screenMain -->
+
+<script>
+var TOKEN   = '<?= token ?>';
+var HUB_URL = 'https://script.google.com/a/macros/brasas.com/s/AKfycbyF7BArYMYFtcQY7_4RTGGPw89yNohAjR7eGptItP-EsnWhNfiZR2ISRaHdAkwlLSlr/exec';
+document.getElementById('hubBackBtn').href = HUB_URL;
+
+var TIPOS = ['Ônibus municipal', 'Ônibus intermunicipal', 'Metrô', 'Barca', 'Trem'];
+var TIPOS_JAE     = ['onibus municipal', 'metro'];
+var TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem'];
+
+var state = {
+  user: null, period: null, funcs: null, counter: 0,
+  availableUnits: [],
+  unitFilter: [],   // vazio = mostra todas as unidades permitidas
+  yearFilter: [],   // vazio = mostra todos os anos
+  monthFilter: [],  // vazio = mostra todos os meses (número 1-12)
+  adminRows: [], docenteRows: []
+};
+
+var MESES = ['01 Janeiro','02 Fevereiro','03 Março','04 Abril','05 Maio','06 Junho',
+             '07 Julho','08 Agosto','09 Setembro','10 Outubro','11 Novembro','12 Dezembro'];
+
+function normStr(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// ── INIT ────────────────────────────────────────────────────
+
+window.onload = function() {
+  if (!TOKEN) { window.top.location.href = HUB_URL; return; }
+  show('screenLoading');
+  google.script.run
+    .withSuccessHandler(onUserLoaded)
+    .withFailureHandler(showError)
+    .getUserFromHub(TOKEN);
+};
+
+function onUserLoaded(user) {
+  state.user = user;
+  google.script.run
+    .withSuccessHandler(onUnidadesLoaded)
+    .withFailureHandler(showError)
+    .getUnidades(TOKEN);
+}
+
+function onUnidadesLoaded(units) {
+  state.availableUnits = units || [];
+  if (!state.availableUnits.length) {
+    showError(new Error('Nenhuma unidade disponível para este usuário.'));
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(onPeriodLoaded)
+    .withFailureHandler(showError)
+    .getCurrentPeriod(TOKEN);
+}
+
+function onPeriodLoaded(period) {
+  state.period = period;
+  google.script.run
+    .withSuccessHandler(onFuncsLoaded)
+    .withFailureHandler(showError)
+    .getFuncionarios(TOKEN);
+}
+
+function onFuncsLoaded(funcs) {
+  state.funcs = funcs;
+  google.script.run
+    .withSuccessHandler(onVTLoaded)
+    .withFailureHandler(showError)
+    .getVTData(TOKEN);
+}
+
+function onVTLoaded(data) {
+  state.adminRows   = data.administrativo || [];
+  state.docenteRows = data.docente        || [];
+  renderUI();
+}
+
+// ── RENDER ──────────────────────────────────────────────────
+
+function renderUI() {
+  var u = state.user;
+  var p = state.period;
+  var periodoStr = MESES[p.previsto.mes - 1] + ' / ' + p.previsto.ano;
+
+  document.getElementById('hPeriodo').textContent = periodoStr;
+  document.getElementById('sPeriodo').textContent  = periodoStr;
+  document.getElementById('hNome').textContent    = u.nome;
+
+  var badge = document.getElementById('hBadge');
+  badge.style.display = '';
+  if (p.locked) {
+    badge.textContent = 'Bloqueado';
+    badge.className   = 'status-badge badge-locked';
+    document.getElementById('lockNotice').style.display = '';
+  } else {
+    badge.textContent = 'Aberto';
+    badge.className   = 'status-badge badge-open';
+    document.getElementById('saveBtn').style.display = '';
+  }
+
+  document.getElementById('admPageBtn').style.display = (u.role === 'admin') ? '' : 'none';
+
+  renderFilterBar();
+  renderUnitLabel();
+  renderCounts();
+  renderAdminTable();
+  renderDocenteTable();
+
+  hideAll();
+  document.getElementById('screenMain').style.display = 'flex';
+}
+
+// ── FILTROS (unidade/ano/mês, todos multi-seleção) ─────────────────
+
+function renderFilterBar() {
+  var wrap = document.getElementById('unitFilterWrap');
+  if (state.availableUnits.length > 1) {
+    wrap.style.display = '';
+    renderMultiselectPanel('unitFilterPanel', state.availableUnits.map(function(un) { return { value: un, label: un }; }), state.unitFilter, 'onUnitFilterCheck');
+    updateUnitFilterLabel();
+  } else {
+    wrap.style.display = 'none';
+  }
+
+  var years = distinctYears();
+  renderMultiselectPanel('yearFilterPanel', years.map(function(y) { return { value: String(y), label: String(y) }; }), state.yearFilter, 'onYearFilterCheck');
+  updateYearFilterLabel();
+
+  renderMultiselectPanel('monthFilterPanel', MESES.map(function(m, i) { return { value: String(i + 1), label: m }; }), state.monthFilter, 'onMonthFilterCheck');
+  updateMonthFilterLabel();
+}
+
+function renderMultiselectPanel(panelId, options, selectedValues, onCheckFnName) {
+  document.getElementById(panelId).innerHTML = options.map(function(opt) {
+    var checked = selectedValues.indexOf(opt.value) !== -1;
+    return '<label class="multiselect-option"><input type="checkbox" value="' + esc(opt.value) + '"' +
+      (checked ? ' checked' : '') + ' onchange="' + onCheckFnName + '()"> ' + esc(opt.label) + '</label>';
+  }).join('');
+}
+
+function multiselectValues(panelId) {
+  return Array.prototype.slice.call(document.querySelectorAll('#' + panelId + ' input:checked')).map(function(c) { return c.value; });
+}
+
+function distinctYears() {
+  var set = {};
+  state.adminRows.concat(state.docenteRows).forEach(function(r) { set[r.ano] = true; });
+  return Object.keys(set).map(Number).sort(function(a, b) { return a - b; });
+}
+
+function refreshFilteredViews() {
+  renderUnitLabel();
+  renderCounts();
+  renderAdminTable();
+  renderDocenteTable();
+}
+
+function toggleDropdown(e, panelId) {
+  e.stopPropagation();
+  var panel  = document.getElementById(panelId);
+  var isOpen = panel.classList.contains('open');
+  document.querySelectorAll('.multiselect-panel.open').forEach(function(p) { p.classList.remove('open'); });
+  if (!isOpen) panel.classList.add('open');
+}
+
+document.addEventListener('click', function(e) {
+  document.querySelectorAll('.multiselect').forEach(function(wrap) {
+    if (!wrap.contains(e.target)) {
+      var panel = wrap.querySelector('.multiselect-panel');
+      if (panel) panel.classList.remove('open');
+    }
+  });
+});
+
+function updateUnitFilterLabel() {
+  var n = state.unitFilter.length;
+  document.getElementById('unitFilterBtnLabel').textContent =
+    n === 0 ? 'Todas as unidades' : (n === 1 ? state.unitFilter[0] : n + ' unidades selecionadas');
+}
+
+function updateYearFilterLabel() {
+  var n = state.yearFilter.length;
+  document.getElementById('yearFilterBtnLabel').textContent =
+    n === 0 ? 'Todos os anos' : (n === 1 ? state.yearFilter[0] : n + ' anos selecionados');
+}
+
+function updateMonthFilterLabel() {
+  var n = state.monthFilter.length;
+  document.getElementById('monthFilterBtnLabel').textContent =
+    n === 0 ? 'Todos os meses' : (n === 1 ? MESES[Number(state.monthFilter[0]) - 1] : n + ' meses selecionados');
+}
+
+function onUnitFilterCheck() {
+  state.unitFilter = multiselectValues('unitFilterPanel');
+  updateUnitFilterLabel();
+  refreshFilteredViews();
+}
+
+function onYearFilterCheck() {
+  state.yearFilter = multiselectValues('yearFilterPanel');
+  updateYearFilterLabel();
+  refreshFilteredViews();
+}
+
+function onMonthFilterCheck() {
+  state.monthFilter = multiselectValues('monthFilterPanel');
+  updateMonthFilterLabel();
+  refreshFilteredViews();
+}
+
+function clearFilters() {
+  state.unitFilter  = [];
+  state.yearFilter  = [];
+  state.monthFilter = [];
+  renderFilterBar();
+  refreshFilteredViews();
+}
+
+function visibleUnits() { return state.unitFilter.length ? state.unitFilter : state.availableUnits; }
+
+function passesFilter(r) {
+  var units = visibleUnits().map(normStr);
+  if (units.indexOf(normStr(r.unidade)) === -1) return false;
+  if (state.yearFilter.length  && state.yearFilter.indexOf(String(r.ano)) === -1) return false;
+  if (state.monthFilter.length && state.monthFilter.indexOf(String(r.mes)) === -1) return false;
+  return true;
+}
+
+function renderUnitLabel() {
+  var list  = visibleUnits();
+  var label = list.length === 1 ? list[0] : (list.length + ' unidades');
+  document.getElementById('hUnidade').textContent = label;
+  document.getElementById('sUnidade').textContent = label;
+}
+
+function renderCounts() {
+  var units   = visibleUnits().map(normStr);
+  var admin   = state.funcs.administrativo.filter(function(e) { return units.indexOf(normStr(e.unidade)) !== -1; });
+  var docente = state.funcs.docente.filter(function(e) { return units.indexOf(normStr(e.unidade)) !== -1; });
+  document.getElementById('sTotal').textContent = admin.length + docente.length;
+}
+
+// ── CÁLCULO (espelha o Code.gs, só para feedback ao vivo na UI) ──
+
+function classificarCartao(tipo) {
+  var t = normStr(tipo);
+  if (TIPOS_JAE.indexOf(t) !== -1) return 'jae';
+  if (TIPOS_RIOCARD.indexOf(t) !== -1) return 'riocard';
+  return null;
+}
+
+function calcularVT(tipoIda, valorIda, qtdIda, tipoVolta, valorVolta, qtdVolta) {
+  var totalIda   = valorIda   * qtdIda;
+  var totalVolta = valorVolta * qtdVolta;
+  var total      = totalIda + totalVolta;
+  var dias       = qtdIda + qtdVolta;
+  var valorDiario = dias > 0 ? total / dias : 0;
+
+  var jae = 0, riocard = 0;
+  var cIda = classificarCartao(tipoIda), cVolta = classificarCartao(tipoVolta);
+  if (cIda   === 'jae') jae += totalIda;       else if (cIda   === 'riocard') riocard += totalIda;
+  if (cVolta === 'jae') jae += totalVolta;     else if (cVolta === 'riocard') riocard += totalVolta;
+
+  return { total: total, dias: dias, valorDiario: valorDiario, jae: jae, riocard: riocard };
+}
+
+function fmtBRL(n) {
+  return 'R$ ' + (Number(n) || 0).toFixed(2).replace('.', ',');
+}
+
+function onVTRowInput(el) {
+  var tr = el.closest('tr');
+  var tipoIda    = tr.querySelector('.vt-tipo-ida').value;
+  var valorIda   = Number(tr.querySelector('.vt-valor-ida').value) || 0;
+  var qtdIda     = Number(tr.querySelector('.vt-qtd-ida').value) || 0;
+  var tipoVolta  = tr.querySelector('.vt-tipo-volta').value;
+  var valorVolta = Number(tr.querySelector('.vt-valor-volta').value) || 0;
+  var qtdVolta   = Number(tr.querySelector('.vt-qtd-volta').value) || 0;
+
+  var c = calcularVT(tipoIda, valorIda, qtdIda, tipoVolta, valorVolta, qtdVolta);
+  tr.querySelector('.vt-total').textContent   = fmtBRL(c.total);
+  tr.querySelector('.vt-dias').textContent    = c.dias;
+  tr.querySelector('.vt-diario').textContent  = fmtBRL(c.valorDiario);
+  tr.querySelector('.vt-jae').textContent     = fmtBRL(c.jae);
+  tr.querySelector('.vt-riocard').textContent = fmtBRL(c.riocard);
+}
+
+// ── TABELAS DE PREENCHIMENTO (mostra só o que já foi lançado; "+ Adicionar" cria linha nova) ──
+
+function tipoField(cls, val, editable) {
+  var opts = TIPOS.map(function(t) {
+    return '<option value="' + esc(t) + '"' + (t === val ? ' selected' : '') + '>' + esc(t) + '</option>';
+  }).join('');
+  return '<td><select class="' + cls + ' vt-tipo-sel"' + (editable ? ' onchange="onVTRowInput(this)"' : ' disabled') + '>' + opts + '</select></td>';
+}
+
+function vtNumField(cls, extraCls, val, editable, step) {
+  return '<td><input type="number" class="' + cls + ' ' + extraCls + '" min="0" step="' + step + '" value="' +
+    (Number(val) || 0) + '"' + (editable ? ' oninput="onVTRowInput(this)"' : ' disabled') + '></td>';
+}
+
+function fmtRegistros(n) { return n + (n === 1 ? ' registro' : ' registros'); }
+
+function isSamePeriod(r, target) { return r.mes === target.mes && r.ano === target.ano; }
+
+function renderRows(rows, p) {
+  return rows.map(function(r) {
+    var open = !p.locked && isSamePeriod(r, p.previsto);
+    return '<tr>' +
+      '<td>' + esc(r.unidade) + '</td>' +
+      '<td>' + esc(MESES[r.mes - 1]) + '</td><td>' + r.ano + '</td>' +
+      '<td>' + esc(r.matricula) + '</td><td>' + esc(r.cpf) + '</td><td>' + esc(r.nome) + '</td>' +
+      tipoField('vt-tipo-ida', r.tipoIda, open) +
+      vtNumField('vt-valor-ida',  'vt-valor', r.valorIda,  open, '0.01') +
+      vtNumField('vt-qtd-ida',    'vt-qtd',   r.qtdIda,    open, '1') +
+      tipoField('vt-tipo-volta', r.tipoVolta, open) +
+      vtNumField('vt-valor-volta','vt-valor', r.valorVolta, open, '0.01') +
+      vtNumField('vt-qtd-volta',  'vt-qtd',   r.qtdVolta,   open, '1') +
+      '<td class="vt-calc vt-total">' + fmtBRL(r.total) + '</td>' +
+      '<td class="vt-calc vt-dias">' + (Number(r.diasTrabalhados) || 0) + '</td>' +
+      '<td class="vt-calc vt-diario">' + fmtBRL(r.valorDiario) + '</td>' +
+      '<td class="vt-calc vt-jae">' + fmtBRL(r.valorJae) + '</td>' +
+      '<td class="vt-calc vt-riocard">' + fmtBRL(r.valorRiocard) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function renderAdminTable() {
+  var rows = state.adminRows.filter(passesFilter);
+  var body = document.getElementById('adminTableBody');
+
+  document.getElementById('adminNoSel').style.display = rows.length ? 'none' : '';
+  document.getElementById('admRecordsPill').textContent = fmtRegistros(rows.length);
+
+  body.innerHTML = renderRows(rows, state.period);
+  renderAddControl('admin');
+}
+
+function renderDocenteTable() {
+  var rows = state.docenteRows.filter(passesFilter);
+  var body = document.getElementById('docenteTableBody');
+
+  document.getElementById('docenteNoSel').style.display = rows.length ? 'none' : '';
+  document.getElementById('docRecordsPill').textContent = fmtRegistros(rows.length);
+
+  body.innerHTML = renderRows(rows, state.period);
+  renderAddControl('docente');
+}
+
+// ── ADICIONAR FUNCIONÁRIO (só para o Previsto do mês seguinte, único período do VT) ──
+
+function renderAddControl(type) {
+  var isAdmin = type === 'admin';
+  var bar     = document.getElementById(isAdmin ? 'adminAddBar' : 'docenteAddBar');
+
+  if (state.period.locked) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+
+  // Restrito às unidades visíveis no filtro atual, senão a linha adicionada ficaria escondida
+  var choices = visibleUnits();
+  var unitSel = document.getElementById(isAdmin ? 'adminAddUnit' : 'docenteAddUnit');
+  var prevVal = unitSel.value;
+  unitSel.innerHTML = choices.map(function(un) {
+    return '<option value="' + esc(un) + '">' + esc(un) + '</option>';
+  }).join('');
+  if (prevVal && choices.indexOf(prevVal) !== -1) unitSel.value = prevVal;
+
+  populateAddEmpDropdown(type);
+}
+
+function populateAddEmpDropdown(type) {
+  var isAdmin = type === 'admin';
+  var unitSel = document.getElementById(isAdmin ? 'adminAddUnit' : 'docenteAddUnit');
+  var empSel  = document.getElementById(isAdmin ? 'adminAddEmp'  : 'docenteAddEmp');
+  var unidade = normStr(unitSel.value);
+  var target  = state.period.previsto;
+  var rows    = isAdmin ? state.adminRows : state.docenteRows;
+
+  var already = {};
+  rows.forEach(function(r) {
+    if (isSamePeriod(r, target) && normStr(r.unidade) === unidade) already[r.matricula] = true;
+  });
+
+  var allEmps = (isAdmin ? state.funcs.administrativo : state.funcs.docente)
+    .filter(function(e) { return normStr(e.unidade) === unidade; });
+  var emps = allEmps.filter(function(e) { return !already[e.matricula]; });
+
+  if (!allEmps.length) {
+    empSel.innerHTML = '<option value="">— Nenhum funcionário cadastrado nesta unidade —</option>';
+    empSel.disabled  = true;
+    return;
+  }
+  if (!emps.length) {
+    empSel.innerHTML = '<option value="">— Todos já lançados neste mês —</option>';
+    empSel.disabled  = true;
+    return;
+  }
+  empSel.disabled  = false;
+  empSel.innerHTML = '<option value="">— Selecione o funcionário —</option>' +
+    emps.map(function(e) { return '<option value="' + esc(e.matricula) + '">' + esc(e.nome) + '</option>'; }).join('');
+}
+
+function addRow(type) {
+  var isAdmin = type === 'admin';
+  var unitSel = document.getElementById(isAdmin ? 'adminAddUnit' : 'docenteAddUnit');
+  var empSel  = document.getElementById(isAdmin ? 'adminAddEmp'  : 'docenteAddEmp');
+  var unidade = unitSel.value;
+  var mat     = empSel.value;
+  if (!unidade || !mat) return;
+
+  var emps = isAdmin ? state.funcs.administrativo : state.funcs.docente;
+  var emp  = emps.filter(function(e) { return e.matricula === mat && normStr(e.unidade) === normStr(unidade); })[0];
+  if (!emp) return;
+
+  var target = state.period.previsto;
+  var rows   = isAdmin ? state.adminRows : state.docenteRows;
+
+  rows.push({
+    unidade: unidade, mes: target.mes, ano: target.ano, matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
+    tipoIda: TIPOS[0], valorIda: 0, qtdIda: 0,
+    tipoVolta: TIPOS[0], valorVolta: 0, qtdVolta: 0,
+    total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0
+  });
+
+  rows.sort(function(a, b) { return (a.ano - b.ano) || (a.mes - b.mes) || a.unidade.localeCompare(b.unidade, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'); });
+
+  if (isAdmin) renderAdminTable(); else renderDocenteTable();
+}
+
+
+// ── TABS ────────────────────────────────────────────────────
+
+function switchTab(tab) {
+  var btns   = document.querySelectorAll('.tab-btn');
+  var panels = document.querySelectorAll('.tab-panel');
+  btns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tab') === tab); });
+  panels.forEach(function(p) { p.classList.remove('active'); });
+
+  var panelId = tab === 'admin' ? 'tabAdmin' : (tab === 'docente' ? 'tabDocente' : 'tabAdmPage');
+  document.getElementById(panelId).classList.add('active');
+
+  if (tab === 'admpage') loadLiberacoes();
+}
+
+// ── ADMINISTRAÇÃO (liberações temporárias de edição) ──────────
+
+function loadLiberacoes() {
+  document.getElementById('liberacoesBody').innerHTML =
+    '<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">Carregando...</td></tr>';
+  google.script.run
+    .withSuccessHandler(renderLiberacoes)
+    .withFailureHandler(showError)
+    .getLiberacoes(TOKEN);
+}
+
+function renderLiberacoes(list) {
+  var body = document.getElementById('liberacoesBody');
+  if (!list || !list.length) {
+    body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">Nenhuma liberação concedida ainda</td></tr>';
+    return;
+  }
+  var now = new Date();
+  body.innerHTML = list.map(function(l) {
+    var ativa = new Date(l.expiraEm) > now;
+    return '<tr><td style="text-align:left">' + esc(l.email) + '</td><td style="text-align:left">' + esc(l.liberadoPor) + '</td>' +
+      '<td>' + fmtDateTime(l.expiraEm) + '</td>' +
+      '<td><span class="status-pill ' + (ativa ? 'ativa">Ativa' : 'expirada">Expirada') + '</span></td></tr>';
+  }).join('');
+}
+
+function fmtDateTime(d) {
+  d = new Date(d);
+  var pad = function(n) { return n < 10 ? '0' + n : n; };
+  return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function criarLiberacao() {
+  var input = document.getElementById('liberEmailInput');
+  var email = input.value.trim();
+  var status = document.getElementById('liberStatus');
+
+  if (!email || email.indexOf('@') === -1) {
+    status.textContent = 'Informe um e-mail válido.';
+    status.className   = 'liber-status error';
+    return;
+  }
+
+  status.textContent = 'Liberando...';
+  status.className   = 'liber-status';
+
+  google.script.run
+    .withSuccessHandler(function(list) {
+      input.value = '';
+      status.textContent = 'Liberação de 24h concedida com sucesso!';
+      status.className   = 'liber-status success';
+      renderLiberacoes(list);
+    })
+    .withFailureHandler(function(err) {
+      status.textContent = 'Erro: ' + (err.message || err);
+      status.className   = 'liber-status error';
+    })
+    .criarLiberacao(TOKEN, email);
+}
+
+// ── SAVE ────────────────────────────────────────────────────
+
+function rowValStr(row, cls) {
+  var el = row.querySelector('.' + cls);
+  return el ? el.value : '';
+}
+
+function rowValNum(row, cls) {
+  var el = row.querySelector('.' + cls);
+  return el ? (Number(el.value) || 0) : 0;
+}
+
+function isOpenPeriod(r) {
+  return isSamePeriod(r, state.period.previsto);
+}
+
+function collectEntries(rowsFiltered, rowEls) {
+  var out = [];
+  rowsFiltered.forEach(function(r, i) {
+    if (!isOpenPeriod(r)) return; // só envia o período aberto (VT só tem Previsto)
+    var row = rowEls[i];
+    out.push({
+      unidade: r.unidade, matricula: r.matricula, cpf: r.cpf, nome: r.nome, mes: r.mes, ano: r.ano,
+      tipoIda:   rowValStr(row, 'vt-tipo-ida'),   valorIda:   rowValNum(row, 'vt-valor-ida'),   qtdIda:   rowValNum(row, 'vt-qtd-ida'),
+      tipoVolta: rowValStr(row, 'vt-tipo-volta'), valorVolta: rowValNum(row, 'vt-valor-volta'), qtdVolta: rowValNum(row, 'vt-qtd-volta')
+    });
+  });
+  return out;
+}
+
+function saveData() {
+  setStatus('Salvando...', 'saving');
+  document.getElementById('saveBtn').disabled = true;
+
+  // Importante: usa os MESMOS índices que renderAdminTable/renderDocenteTable usaram pra desenhar
+  // (rows filtradas), já que as linhas no DOM só existem para o que passou no filtro atual.
+  var adminEntries   = collectEntries(state.adminRows.filter(passesFilter),   document.querySelectorAll('#adminTableBody tr'));
+  var docenteEntries = collectEntries(state.docenteRows.filter(passesFilter), document.querySelectorAll('#docenteTableBody tr'));
+
+  google.script.run
+    .withSuccessHandler(function() {
+      setStatus('Dados salvos com sucesso!', 'success');
+      document.getElementById('saveBtn').disabled = false;
+      reloadData();
+    })
+    .withFailureHandler(function(err) {
+      setStatus('Erro: ' + (err.message || err), 'error');
+      document.getElementById('saveBtn').disabled = false;
+    })
+    .saveVTData({
+      token: TOKEN,
+      administrativo: adminEntries,
+      docente: docenteEntries
+    });
+}
+
+// Recarrega os dados após salvar, para refletir o estado real da planilha
+function reloadData() {
+  google.script.run
+    .withSuccessHandler(onVTLoaded)
+    .withFailureHandler(showError)
+    .getVTData(TOKEN);
+}
+
+// ── UTILS ───────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function show(id) {
+  hideAll();
+  var el = document.getElementById(id);
+  if (el) el.style.display = (id === 'screenMain') ? 'flex' : '';
+}
+
+function hideAll() {
+  ['screenLoading','screenError','screenMain'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function setStatus(msg, type) {
+  var el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className   = 'status-msg ' + type;
+}
+
+function showError(err) {
+  show('screenError');
+  document.getElementById('errorMsg').textContent =
+    (err && err.message) ? err.message : String(err);
+}
+</script>
+</body>
+</html>
