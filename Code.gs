@@ -6,6 +6,7 @@ const VT_SHEET_ID   = '1zDOd3nUIojbDVPgglDfZ5wsEOldwCcOGjLeh_YkU4yU';
 const FUNC_SHEET_ID = '1BDiPjv0FqRJp5EwcvLdYXVvEAWesvwdEgbhYdnTlqPY';
 const HUB_SS_ID      = '1eZPbzhzjhjHoPwMhAW5YvOZgYiAvlTYc07dRan6Lyoc';
 const MEU_ACESSO     = 'webvt';
+const HUB_URL        = 'https://script.google.com/a/macros/brasas.com/s/AKfycbyF7BArYMYFtcQY7_4RTGGPw89yNohAjR7eGptItP-EsnWhNfiZR2ISRaHdAkwlLSlr/exec';
 
 // v1 ainda não cobre São Paulo (regras de Bilhete Único pendentes) — só a unidade VO é de SP hoje
 const UNIDADE_FORA_DE_ESCOPO = 'VO';
@@ -224,7 +225,7 @@ function getLiberacoesSheet_() {
 function requireAdmin_(token) {
   const user = getSessionUser_(token);
   if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
-  if (user.role !== 'admin') throw new Error('Acesso restrito a administradores.');
+  if (user.role !== 'admin' && user.role !== 'dp') throw new Error('Acesso restrito a administradores e ao Departamento Pessoal.');
   return user;
 }
 
@@ -266,7 +267,91 @@ function criarLiberacao(token, email) {
   const expira = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
   getLiberacoesSheet_().appendRow([email, admin.email, now, expira]);
+  enviarEmailLiberacao_(email, now, expira);
   return getLiberacoes(token);
+}
+
+// Avisa por e-mail quem recebeu a liberação. Falha de envio não deve derrubar a liberação em si.
+function enviarEmailLiberacao_(email, criadoEm, expira) {
+  try {
+    const pad = function(n) { return n < 10 ? '0' + n : n; };
+    const fmtDT = function(d) {
+      return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() +
+        ' às ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    };
+    const criadoStr = fmtDT(criadoEm);
+    const expiraStr = fmtDT(expira);
+
+    const assunto = 'Liberação temporária de edição — Vale Transporte';
+
+    const corpoTexto =
+      'Você recebeu uma liberação temporária de 24 horas para editar o Vale Transporte fora do prazo normal, ' +
+      'concedida pelo Departamento Pessoal.\n\n' +
+      'Concedida em: ' + criadoStr + '\n' +
+      'Válida até: ' + expiraStr + '\n\n' +
+      'Acesse pelo Hub BRASAS BI: ' + HUB_URL + '\n\n' +
+      'Após esse prazo, a edição volta a ficar bloqueada automaticamente.\n\n' +
+      'Equipe BRASAS BI';
+
+    const corpoHtml =
+      '<div style="background:#f1f5f9;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">' +
+        '<div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0">' +
+
+          '<div style="background:#0a1628;padding:26px 32px">' +
+            '<h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;line-height:1.3">' +
+              'Liberação Temporária de Edição — Vale Transporte' +
+            '</h1>' +
+          '</div>' +
+
+          '<div style="padding:28px 32px">' +
+
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:13px;color:#475569">' +
+              '&#9888;&#65039; Este é um comunicado automático. <strong>Não responda este e-mail</strong> — em caso de dúvidas, entre em contato com o Departamento Pessoal pelo endereço <a href="mailto:dp@brasas.com" style="color:#2a4d76">dp@brasas.com</a>.' +
+            '</div>' +
+
+            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035">Olá,</p>' +
+
+            '<p style="margin:0 0 22px;font-size:15px;color:#0f2035;line-height:1.6">' +
+              'Você recebeu uma liberação temporária de <strong>24 horas</strong> para editar o ' +
+              '<strong>Vale Transporte</strong> fora do prazo normal (dia 11).' +
+            '</p>' +
+
+            '<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:18px 20px;margin-bottom:24px">' +
+              '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:14px">Dados da liberação</div>' +
+              '<table style="width:100%;border-collapse:collapse;font-size:14px">' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;width:150px">Liberado por:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">Departamento Pessoal</td>' +
+                '</tr>' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b">Concedida em:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + criadoStr + '</td>' +
+                '</tr>' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b">Válida até:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + expiraStr + '</td>' +
+                '</tr>' +
+              '</table>' +
+            '</div>' +
+
+            '<div style="text-align:center;margin-bottom:8px">' +
+              '<a href="' + HUB_URL + '" style="display:inline-block;background:#0f2035;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px">' +
+                'Acessar o Vale Transporte' +
+              '</a>' +
+            '</div>' +
+
+            '<p style="margin:20px 0 0;font-size:12.5px;color:#94a3b8;text-align:center">' +
+              'Após o prazo acima, a edição volta a ficar bloqueada automaticamente.' +
+            '</p>' +
+
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    MailApp.sendEmail(email, assunto, corpoTexto, { htmlBody: corpoHtml, name: 'Vale Transporte — BRASAS BI' });
+  } catch (e) {
+    Logger.log('enviarEmailLiberacao_: falha ao enviar e-mail para ' + email + ' — ' + e);
+  }
 }
 
 // =============================================================================
