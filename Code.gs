@@ -42,6 +42,12 @@ function parseMes_(v) {
   return parseInt(String(v).trim(), 10) || 0;
 }
 
+// Coluna ATIVO (K) guarda o texto "Ativo"/"Inativo" (às vezes true/false, sim/não)
+function isInativo_(v) {
+  const n = norm_(v);
+  return n === 'inativo' || n === 'inactive' || n === 'false' || n === 'nao' || n === 'no' || n === '0';
+}
+
 // =============================================================================
 // ENTRY POINT
 // =============================================================================
@@ -140,8 +146,7 @@ function getAllowedUnidades_(user) {
     for (let i = 1; i < funcRows.length; i++) {
       const nome = String(funcRows[i][COL.NOME] || '').trim();
       if (!nome) continue;
-      const ativoRaw = norm_(funcRows[i][COL.ATIVO]);
-      if (ativoRaw === 'false' || ativoRaw === 'nao' || ativoRaw === 'no' || ativoRaw === '0') continue;
+      if (isInativo_(funcRows[i][COL.ATIVO])) continue;
       const u = String(funcRows[i][COL.UNIDADE] || '').trim();
       if (u) set[u] = true;
     }
@@ -289,8 +294,7 @@ function getFuncionarios(token) {
     const nome = String(row[COL.NOME]).trim();
     if (!nome) continue;
 
-    const ativoRaw = norm_(row[COL.ATIVO]);
-    if (ativoRaw === 'false' || ativoRaw === 'nao' || ativoRaw === 'no' || ativoRaw === '0') continue;
+    if (isInativo_(row[COL.ATIVO])) continue;
 
     const matricula = String(row[COL.MATRICULA]).trim();
     if (!matricula) continue;

@@ -237,6 +237,14 @@ input[type=number]:disabled {
 }
 .clear-filters-btn:hover {border-color:var(--navy-300);color:var(--navy-700)}
 
+.copy-btn {
+  background:var(--white);border:1.5px solid var(--navy-300);border-radius:8px;
+  padding:8px 16px;font-family:var(--font);font-size:.82rem;font-weight:700;
+  color:var(--navy-700);cursor:pointer;white-space:nowrap;
+  transition:background .15s,border-color .15s;
+}
+.copy-btn:hover {background:var(--navy-50);border-color:var(--navy-500)}
+
 /* ── TABELA DE LANÇAMENTOS (estilo relatório, bordas leves) ───── */
 .hist-section {padding:20px;overflow-x:auto}
 .hist-table {
@@ -425,7 +433,10 @@ input[type=number]:disabled {
             <div class="table-card-title">Administrativo</div>
             <div class="table-card-sub">Vale transporte previsto por colaborador (ida e volta)</div>
           </div>
-          <span class="records-pill" id="admRecordsPill">0 registros</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button type="button" class="copy-btn" id="adminCopyBtn" style="display:none" onclick="copyFromPreviousMonth('admin')">Copiar mês anterior</button>
+            <span class="records-pill" id="admRecordsPill">0 registros</span>
+          </div>
         </div>
         <div id="adminNoSel" class="no-sel-hint" style="display:none">Nenhum lançamento com os filtros atuais. Use "Adicionar" abaixo.</div>
         <div class="hist-section">
@@ -457,7 +468,10 @@ input[type=number]:disabled {
             <div class="table-card-title">Docente</div>
             <div class="table-card-sub">Vale transporte previsto por colaborador (ida e volta)</div>
           </div>
-          <span class="records-pill" id="docRecordsPill">0 registros</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button type="button" class="copy-btn" id="docenteCopyBtn" style="display:none" onclick="copyFromPreviousMonth('docente')">Copiar mês anterior</button>
+            <span class="records-pill" id="docRecordsPill">0 registros</span>
+          </div>
         </div>
         <div id="docenteNoSel" class="no-sel-hint" style="display:none">Nenhum lançamento com os filtros atuais. Use "Adicionar" abaixo.</div>
         <div class="hist-section">
@@ -856,6 +870,7 @@ function renderAdminTable() {
 
   body.innerHTML = renderRows(rows, state.period);
   renderAddControl('admin');
+  renderCopyButton('admin');
 }
 
 function renderDocenteTable() {
@@ -867,6 +882,86 @@ function renderDocenteTable() {
 
   body.innerHTML = renderRows(rows, state.period);
   renderAddControl('docente');
+  renderCopyButton('docente');
+}
+
+// ── COPIAR LANÇAMENTOS DO MÊS ANTERIOR (mesmos tipo/valor/qtd, editáveis depois) ──
+
+function prevPeriod(target) {
+  var mes = target.mes - 1, ano = target.ano;
+  if (mes < 1) { mes = 12; ano--; }
+  return { mes: mes, ano: ano };
+}
+
+// Lançamentos do mês anterior, dentro das unidades visíveis, que ainda não existem
+// no mês corrente e cujo funcionário continua ativo/cadastrado naquela unidade.
+function copyableEntries(type) {
+  var isAdmin = type === 'admin';
+  var rows    = isAdmin ? state.adminRows : state.docenteRows;
+  var target  = state.period.previsto;
+  var prev    = prevPeriod(target);
+  var units   = visibleUnits().map(normStr);
+
+  var existing = {};
+  rows.forEach(function(r) {
+    if (isSamePeriod(r, target)) existing[normStr(r.unidade) + '|' + r.matricula] = true;
+  });
+
+  var funcMap = {};
+  (isAdmin ? state.funcs.administrativo : state.funcs.docente).forEach(function(e) {
+    funcMap[normStr(e.unidade) + '|' + e.matricula] = e;
+  });
+
+  return rows.filter(function(r) {
+    if (r.mes !== prev.mes || r.ano !== prev.ano) return false;
+    if (units.indexOf(normStr(r.unidade)) === -1) return false;
+    var key = normStr(r.unidade) + '|' + r.matricula;
+    if (existing[key]) return false;
+    return !!funcMap[key];
+  }).map(function(r) {
+    return { prevRow: r, emp: funcMap[normStr(r.unidade) + '|' + r.matricula] };
+  });
+}
+
+function renderCopyButton(type) {
+  var isAdmin = type === 'admin';
+  var btn = document.getElementById(isAdmin ? 'adminCopyBtn' : 'docenteCopyBtn');
+  if (state.period.locked) { btn.style.display = 'none'; return; }
+
+  var count = copyableEntries(type).length;
+  if (!count) { btn.style.display = 'none'; return; }
+  btn.style.display   = '';
+  btn.textContent = 'Copiar mês anterior (' + count + ')';
+}
+
+function copyFromPreviousMonth(type) {
+  var isAdmin  = type === 'admin';
+  var entries  = copyableEntries(type);
+  if (!entries.length) return;
+
+  var target = state.period.previsto;
+  var msg = 'Copiar ' + entries.length + ' lançamento(s) do mês anterior para ' +
+    MESES[target.mes - 1] + ' / ' + target.ano + '? Você poderá editar os valores antes de salvar.';
+  if (!window.confirm(msg)) return;
+
+  var rows = isAdmin ? state.adminRows : state.docenteRows;
+
+  entries.forEach(function(item) {
+    var r = item.prevRow, emp = item.emp;
+    rows.push({
+      unidade: emp.unidade, mes: target.mes, ano: target.ano,
+      matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
+      tipoIda: r.tipoIda, valorIda: r.valorIda, qtdIda: r.qtdIda,
+      tipoVolta: r.tipoVolta, valorVolta: r.valorVolta, qtdVolta: r.qtdVolta,
+      total: r.total, diasTrabalhados: r.diasTrabalhados, valorDiario: r.valorDiario,
+      valorJae: r.valorJae, valorRiocard: r.valorRiocard
+    });
+  });
+
+  rows.sort(function(a, b) { return (a.ano - b.ano) || (a.mes - b.mes) || a.unidade.localeCompare(b.unidade, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'); });
+
+  if (isAdmin) renderAdminTable(); else renderDocenteTable();
+  setStatus(entries.length + ' lançamento(s) copiado(s) do mês anterior. Revise e clique em "Salvar dados".', 'success');
 }
 
 // ── ADICIONAR FUNCIONÁRIO (só para o Previsto do mês seguinte, único período do VT) ──
