@@ -26,10 +26,12 @@ const COL = {
 const TIPOS_JAE     = ['onibus municipal', 'metro'];             // normalizados (sem acento)
 const TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']; // normalizados (sem acento)
 
-// Cabeçalhos das abas da planilha VT (criadas automaticamente se não existirem)
+// Cabeçalhos das abas da planilha VT (criadas automaticamente se não existirem).
+// As colunas do 2º trecho (R-U) ficam no FINAL para não deslocar as colunas das
+// linhas já salvas; o 2º trecho usa a mesma Qtd do 1º (quantidade é por sentido).
 const VT_HEADERS = {
-  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard'],
-  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard']
+  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2'],
+  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2']
 };
 
 // Normaliza texto para comparação: minúsculo, sem acento, sem espaços nas bordas
@@ -414,6 +416,14 @@ function getOrCreateVTSheet_(ss, name) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(VT_HEADERS[name]);
     sheet.setFrozenRows(1);
+  } else {
+    // Abas criadas antes do 2º trecho não têm as colunas R-U — completa os cabeçalhos que faltam
+    const headers = VT_HEADERS[name];
+    const lastCol = sheet.getLastColumn();
+    if (lastCol > 0 && lastCol < headers.length) {
+      sheet.getRange(1, lastCol + 1, 1, headers.length - lastCol)
+        .setValues([headers.slice(lastCol)]);
+    }
   }
   return sheet;
 }
@@ -431,24 +441,28 @@ function classificarCartao_(tipo) {
 }
 
 function calcularVT_(e) {
-  const valorIda   = Number(e.valorIda)   || 0;
-  const qtdIda     = Number(e.qtdIda)     || 0;
-  const valorVolta = Number(e.valorVolta) || 0;
-  const qtdVolta   = Number(e.qtdVolta)   || 0;
+  const qtdIda   = Number(e.qtdIda)   || 0;
+  const qtdVolta = Number(e.qtdVolta) || 0;
 
-  const totalIda   = valorIda   * qtdIda;
-  const totalVolta = valorVolta * qtdVolta;
-  const total      = totalIda + totalVolta;
-  const dias       = qtdIda + qtdVolta;
+  // Até 2 trechos por sentido; o 2º trecho usa a MESMA quantidade do 1º
+  // (a Qtd é por sentido), então ele soma no total mas não nos dias.
+  const legs = [
+    { tipo: e.tipoIda,    total: (Number(e.valorIda)    || 0) * qtdIda },
+    { tipo: e.tipoIda2,   total: (Number(e.valorIda2)   || 0) * qtdIda },
+    { tipo: e.tipoVolta,  total: (Number(e.valorVolta)  || 0) * qtdVolta },
+    { tipo: e.tipoVolta2, total: (Number(e.valorVolta2) || 0) * qtdVolta }
+  ];
+
+  let total = 0, valorJae = 0, valorRiocard = 0;
+  legs.forEach(function(l) {
+    total += l.total;
+    const cartao = classificarCartao_(l.tipo);
+    if (cartao === 'jae')     valorJae     += l.total;
+    if (cartao === 'riocard') valorRiocard += l.total;
+  });
+
+  const dias        = qtdIda + qtdVolta;
   const valorDiario = dias > 0 ? total / dias : 0;
-
-  let valorJae = 0, valorRiocard = 0;
-  const cartaoIda   = classificarCartao_(e.tipoIda);
-  const cartaoVolta = classificarCartao_(e.tipoVolta);
-  if (cartaoIda   === 'jae')     valorJae     += totalIda;
-  if (cartaoIda   === 'riocard') valorRiocard += totalIda;
-  if (cartaoVolta === 'jae')     valorJae     += totalVolta;
-  if (cartaoVolta === 'riocard') valorRiocard += totalVolta;
 
   return { total: total, diasTrabalhados: dias, valorDiario: valorDiario, valorJae: valorJae, valorRiocard: valorRiocard };
 }
@@ -458,7 +472,8 @@ function calcularVT_(e) {
 // =============================================================================
 
 // Colunas ADMINISTRATIVO/DOCENTE: Unidade|Mês|Ano|Matrícula|CPF|Nome|
-//   TipoIda|ValorIda|QtdIda|TipoVolta|ValorVolta|QtdVolta|Total|DiasTrabalhados|ValorDiário|ValorJaé|ValorRioCard
+//   TipoIda|ValorIda|QtdIda|TipoVolta|ValorVolta|QtdVolta|Total|DiasTrabalhados|ValorDiário|ValorJaé|ValorRioCard|
+//   TipoIda2|ValorIda2|TipoVolta2|ValorVolta2 (2º trecho opcional, no final para compatibilidade)
 function getVTData(token) {
   const user = getSessionUser_(token);
   if (!user) throw new Error('Sessão inválida.');
@@ -482,7 +497,9 @@ function getVTData(token) {
         tipoIda: String(r[6]).trim(), valorIda: r[7] || 0, qtdIda: r[8] || 0,
         tipoVolta: String(r[9]).trim(), valorVolta: r[10] || 0, qtdVolta: r[11] || 0,
         total: r[12] || 0, diasTrabalhados: r[13] || 0, valorDiario: r[14] || 0,
-        valorJae: r[15] || 0, valorRiocard: r[16] || 0
+        valorJae: r[15] || 0, valorRiocard: r[16] || 0,
+        tipoIda2: String(r[17] || '').trim(), valorIda2: r[18] || 0,
+        tipoVolta2: String(r[19] || '').trim(), valorVolta2: r[20] || 0
       });
     }
 
@@ -516,12 +533,15 @@ function saveVTData(payload) {
   const adminEntries   = (payload.administrativo || []).filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
   const docenteEntries = (payload.docente        || []).filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
 
+  // Ordem espelha as colunas G-U da aba: trecho 1 (G-L), calculados (M-Q), trecho 2 (R-U)
   function valuesFn(e) {
     const calc = calcularVT_(e);
     return [
       e.tipoIda || '', Number(e.valorIda) || 0, Number(e.qtdIda) || 0,
       e.tipoVolta || '', Number(e.valorVolta) || 0, Number(e.qtdVolta) || 0,
-      calc.total, calc.diasTrabalhados, calc.valorDiario, calc.valorJae, calc.valorRiocard
+      calc.total, calc.diasTrabalhados, calc.valorDiario, calc.valorJae, calc.valorRiocard,
+      e.tipoIda2 || '', Number(e.valorIda2) || 0,
+      e.tipoVolta2 || '', Number(e.valorVolta2) || 0
     ];
   }
 
@@ -554,6 +574,44 @@ function _upsertRows_(sheet, entries, valuesFn) {
       map[key] = sheet.getLastRow();
     }
   });
+}
+
+// =============================================================================
+// EXCLUSÃO DE LANÇAMENTO — remove a linha (unidade+mes+ano+matricula) da aba.
+// Só permite excluir lançamentos do período vigente (Previsto).
+// =============================================================================
+
+function deleteVTEntry(payload) {
+  // DEV: validação de bloqueio desativada — restaurar após testes:
+  // const period = getCurrentPeriod(payload.token);
+  // if (period.locked) throw new Error('O período está bloqueado. Prazo encerrado no dia 11.');
+
+  const user = getSessionUser_(payload.token);
+  if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+  if (!isUserAllowedUnit_(user, payload.unidade)) throw new Error('Você não tem permissão para esta unidade.');
+
+  const period = getCurrentPeriod(payload.token);
+  if (Number(payload.mes) !== period.previsto.mes || Number(payload.ano) !== period.previsto.ano) {
+    throw new Error('Só é possível excluir lançamentos do período vigente.');
+  }
+
+  const sheetName = payload.categoria === 'docente' ? 'DOCENTE' : 'ADMINISTRATIVO';
+  const ss    = SpreadsheetApp.openById(VT_SHEET_ID);
+  const sheet = getOrCreateVTSheet_(ss, sheetName);
+
+  const key  = norm_(payload.unidade) + '|' + Number(payload.mes) + '|' + Number(payload.ano) + '|' + String(payload.matricula).trim();
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const k = norm_(r[0]) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim();
+    if (k === key) {
+      sheet.deleteRow(i + 1);
+      return { success: true };
+    }
+  }
+
+  // Linha não encontrada na planilha (provavelmente nunca foi salva) — nada a fazer
+  return { success: true };
 }
 
 // =============================================================================

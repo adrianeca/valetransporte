@@ -254,6 +254,32 @@ input[type=number]:disabled {
   50%     {box-shadow:0 2px 16px rgba(245,158,11,.65)}
 }
 
+.row-del-btn {
+  background:none;border:none;cursor:pointer;
+  color:var(--gray-400);font-size:.95rem;line-height:1;
+  padding:5px 7px;border-radius:6px;
+  transition:background .15s,color .15s;
+}
+.row-del-btn:hover {background:var(--danger-100);color:var(--danger-600)}
+
+/* 2º trecho de transporte (ida/volta): campos empilhados na mesma célula */
+.leg-stack {display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.leg-row   {display:flex;align-items:center;gap:4px}
+.leg-add-btn {
+  background:none;border:1px dashed var(--gray-300);border-radius:6px;
+  color:var(--gray-400);font-size:.8rem;font-weight:700;line-height:1;
+  padding:5px 8px;cursor:pointer;font-family:var(--font);
+  transition:border-color .15s,color .15s;
+}
+.leg-add-btn:hover {border-color:var(--navy-400);color:var(--navy-600)}
+.leg-del-btn {
+  background:none;border:none;cursor:pointer;
+  color:var(--gray-400);font-size:.85rem;line-height:1;
+  padding:3px 5px;border-radius:5px;
+  transition:background .15s,color .15s;
+}
+.leg-del-btn:hover {background:var(--danger-100);color:var(--danger-600)}
+
 /* ── TABELA DE LANÇAMENTOS (estilo relatório, bordas leves) ───── */
 .hist-section {padding:20px;overflow-x:auto}
 .hist-table {
@@ -456,6 +482,7 @@ input[type=number]:disabled {
                 <th colspan="3">Ida</th><th colspan="3">Volta</th>
                 <th rowspan="2">Total</th><th rowspan="2">Dias Trab.</th><th rowspan="2">Valor Diário</th>
                 <th rowspan="2">Valor Jaé</th><th rowspan="2">Valor RioCard</th>
+                <th rowspan="2"></th>
               </tr>
               <tr><th>Tipo</th><th>Valor</th><th>Qtd</th><th>Tipo</th><th>Valor</th><th>Qtd</th></tr>
             </thead>
@@ -491,6 +518,7 @@ input[type=number]:disabled {
                 <th colspan="3">Ida</th><th colspan="3">Volta</th>
                 <th rowspan="2">Total</th><th rowspan="2">Dias Trab.</th><th rowspan="2">Valor Diário</th>
                 <th rowspan="2">Valor Jaé</th><th rowspan="2">Valor RioCard</th>
+                <th rowspan="2"></th>
               </tr>
               <tr><th>Tipo</th><th>Valor</th><th>Qtd</th><th>Tipo</th><th>Valor</th><th>Qtd</th></tr>
             </thead>
@@ -793,19 +821,29 @@ function classificarCartao(tipo) {
   return null;
 }
 
-function calcularVT(tipoIda, valorIda, qtdIda, tipoVolta, valorVolta, qtdVolta) {
-  var totalIda   = valorIda   * qtdIda;
-  var totalVolta = valorVolta * qtdVolta;
-  var total      = totalIda + totalVolta;
-  var dias       = qtdIda + qtdVolta;
-  var valorDiario = dias > 0 ? total / dias : 0;
+// Recebe um objeto com os mesmos nomes de campos das linhas do state
+// (tipoIda, valorIda, tipoIda2, valorIda2, qtdIda, e os equivalentes de volta).
+// Até 2 trechos por sentido; o 2º trecho usa a MESMA Qtd do 1º — soma no total, não nos dias.
+function calcularVT(v) {
+  var qtdIda   = Number(v.qtdIda)   || 0;
+  var qtdVolta = Number(v.qtdVolta) || 0;
 
-  var jae = 0, riocard = 0;
-  var cIda = classificarCartao(tipoIda), cVolta = classificarCartao(tipoVolta);
-  if (cIda   === 'jae') jae += totalIda;       else if (cIda   === 'riocard') riocard += totalIda;
-  if (cVolta === 'jae') jae += totalVolta;     else if (cVolta === 'riocard') riocard += totalVolta;
+  var legs = [
+    { tipo: v.tipoIda,    total: (Number(v.valorIda)    || 0) * qtdIda },
+    { tipo: v.tipoIda2,   total: (Number(v.valorIda2)   || 0) * qtdIda },
+    { tipo: v.tipoVolta,  total: (Number(v.valorVolta)  || 0) * qtdVolta },
+    { tipo: v.tipoVolta2, total: (Number(v.valorVolta2) || 0) * qtdVolta }
+  ];
 
-  return { total: total, dias: dias, valorDiario: valorDiario, jae: jae, riocard: riocard };
+  var total = 0, jae = 0, riocard = 0;
+  legs.forEach(function(l) {
+    total += l.total;
+    var c = classificarCartao(l.tipo);
+    if (c === 'jae') jae += l.total; else if (c === 'riocard') riocard += l.total;
+  });
+
+  var dias = qtdIda + qtdVolta;
+  return { total: total, dias: dias, valorDiario: dias > 0 ? total / dias : 0, jae: jae, riocard: riocard };
 }
 
 function fmtBRL(n) {
@@ -814,14 +852,14 @@ function fmtBRL(n) {
 
 function onVTRowInput(el) {
   var tr = el.closest('tr');
-  var tipoIda    = tr.querySelector('.vt-tipo-ida').value;
-  var valorIda   = Number(tr.querySelector('.vt-valor-ida').value) || 0;
-  var qtdIda     = Number(tr.querySelector('.vt-qtd-ida').value) || 0;
-  var tipoVolta  = tr.querySelector('.vt-tipo-volta').value;
-  var valorVolta = Number(tr.querySelector('.vt-valor-volta').value) || 0;
-  var qtdVolta   = Number(tr.querySelector('.vt-qtd-volta').value) || 0;
-
-  var c = calcularVT(tipoIda, valorIda, qtdIda, tipoVolta, valorVolta, qtdVolta);
+  var c = calcularVT({
+    tipoIda:    rowValStr(tr, 'vt-tipo-ida'),    valorIda:    rowValNum(tr, 'vt-valor-ida'),
+    tipoIda2:   rowValStr(tr, 'vt-tipo-ida2'),   valorIda2:   rowValNum(tr, 'vt-valor-ida2'),
+    qtdIda:     rowValNum(tr, 'vt-qtd-ida'),
+    tipoVolta:  rowValStr(tr, 'vt-tipo-volta'),  valorVolta:  rowValNum(tr, 'vt-valor-volta'),
+    tipoVolta2: rowValStr(tr, 'vt-tipo-volta2'), valorVolta2: rowValNum(tr, 'vt-valor-volta2'),
+    qtdVolta:   rowValNum(tr, 'vt-qtd-volta')
+  });
   tr.querySelector('.vt-total').textContent   = fmtBRL(c.total);
   tr.querySelector('.vt-dias').textContent    = c.dias;
   tr.querySelector('.vt-diario').textContent  = fmtBRL(c.valorDiario);
@@ -831,40 +869,77 @@ function onVTRowInput(el) {
 
 // ── TABELAS DE PREENCHIMENTO (mostra só o que já foi lançado; "+ Adicionar" cria linha nova) ──
 
-function tipoField(cls, val, editable) {
+function tipoSelectHtml(cls, val, editable) {
   var opts = TIPOS.map(function(t) {
     return '<option value="' + esc(t) + '"' + (t === val ? ' selected' : '') + '>' + esc(t) + '</option>';
   }).join('');
-  return '<td><select class="' + cls + ' vt-tipo-sel"' + (editable ? ' onchange="onVTRowInput(this)"' : ' disabled') + '>' + opts + '</select></td>';
+  return '<select class="' + cls + ' vt-tipo-sel"' + (editable ? ' onchange="onVTRowInput(this)"' : ' disabled') + '>' + opts + '</select>';
 }
 
-function vtNumField(cls, extraCls, val, editable, step) {
-  return '<td><input type="number" class="' + cls + ' ' + extraCls + '" min="0" step="' + step + '" value="' +
-    (Number(val) || 0) + '"' + (editable ? ' oninput="onVTRowInput(this)"' : ' disabled') + '></td>';
+function numInputHtml(cls, extraCls, val, editable, step) {
+  return '<input type="number" class="' + cls + ' ' + extraCls + '" min="0" step="' + step + '" value="' +
+    (Number(val) || 0) + '"' + (editable ? ' oninput="onVTRowInput(this)"' : ' disabled') + '>';
+}
+
+// Célula de Tipo do sentido (ida/volta): trecho 1 sempre; trecho 2 empilhado quando existe.
+// Quando editável, mostra "+" para adicionar o 2º trecho ou "×" para removê-lo.
+function tipoCell(type, i, sentido, r, open) {
+  var isIda = sentido === 'ida';
+  var tipo1 = isIda ? r.tipoIda  : r.tipoVolta;
+  var tipo2 = isIda ? r.tipoIda2 : r.tipoVolta2;
+  var cls1  = isIda ? 'vt-tipo-ida' : 'vt-tipo-volta';
+
+  var html = '<td><div class="leg-stack">';
+  if (tipo2) {
+    html += '<div class="leg-row">' + tipoSelectHtml(cls1, tipo1, open) + '</div>' +
+      '<div class="leg-row">' + tipoSelectHtml(cls1 + '2', tipo2, open) +
+      (open ? '<button type="button" class="leg-del-btn" title="Remover 2º meio de transporte" onclick="removeLeg2(\'' + type + '\',' + i + ',\'' + sentido + '\')">×</button>' : '') +
+      '</div>';
+  } else {
+    html += '<div class="leg-row">' + tipoSelectHtml(cls1, tipo1, open) +
+      (open ? '<button type="button" class="leg-add-btn" title="Adicionar 2º meio de transporte" onclick="addLeg2(\'' + type + '\',' + i + ',\'' + sentido + '\')">+</button>' : '') +
+      '</div>';
+  }
+  return html + '</div></td>';
+}
+
+// Célula de Valor do sentido: um input por trecho existente
+function valorCell(sentido, r, open) {
+  var isIda = sentido === 'ida';
+  var cls1  = isIda ? 'vt-valor-ida' : 'vt-valor-volta';
+  var html  = '<td><div class="leg-stack">' + numInputHtml(cls1, 'vt-valor', isIda ? r.valorIda : r.valorVolta, open, '0.01');
+  if (isIda ? r.tipoIda2 : r.tipoVolta2) {
+    html += numInputHtml(cls1 + '2', 'vt-valor', isIda ? r.valorIda2 : r.valorVolta2, open, '0.01');
+  }
+  return html + '</div></td>';
 }
 
 function fmtRegistros(n) { return n + (n === 1 ? ' registro' : ' registros'); }
 
 function isSamePeriod(r, target) { return r.mes === target.mes && r.ano === target.ano; }
 
-function renderRows(rows, p) {
-  return rows.map(function(r) {
+function renderRows(rows, p, type) {
+  return rows.map(function(r, i) {
     var open = !p.locked && isSamePeriod(r, p.previsto);
+    var delCell = open
+      ? '<td><button type="button" class="row-del-btn" title="Excluir lançamento" onclick="deleteRow(\'' + type + '\',' + i + ')">🗑</button></td>'
+      : '<td></td>';
     return '<tr>' +
       '<td>' + esc(r.unidade) + '</td>' +
       '<td>' + esc(MESES[r.mes - 1]) + '</td><td>' + r.ano + '</td>' +
       '<td>' + esc(r.matricula) + '</td><td>' + esc(r.cpf) + '</td><td>' + esc(r.nome) + '</td>' +
-      tipoField('vt-tipo-ida', r.tipoIda, open) +
-      vtNumField('vt-valor-ida',  'vt-valor', r.valorIda,  open, '0.01') +
-      vtNumField('vt-qtd-ida',    'vt-qtd',   r.qtdIda,    open, '1') +
-      tipoField('vt-tipo-volta', r.tipoVolta, open) +
-      vtNumField('vt-valor-volta','vt-valor', r.valorVolta, open, '0.01') +
-      vtNumField('vt-qtd-volta',  'vt-qtd',   r.qtdVolta,   open, '1') +
+      tipoCell(type, i, 'ida', r, open) +
+      valorCell('ida', r, open) +
+      '<td>' + numInputHtml('vt-qtd-ida', 'vt-qtd', r.qtdIda, open, '1') + '</td>' +
+      tipoCell(type, i, 'volta', r, open) +
+      valorCell('volta', r, open) +
+      '<td>' + numInputHtml('vt-qtd-volta', 'vt-qtd', r.qtdVolta, open, '1') + '</td>' +
       '<td class="vt-calc vt-total">' + fmtBRL(r.total) + '</td>' +
       '<td class="vt-calc vt-dias">' + (Number(r.diasTrabalhados) || 0) + '</td>' +
       '<td class="vt-calc vt-diario">' + fmtBRL(r.valorDiario) + '</td>' +
       '<td class="vt-calc vt-jae">' + fmtBRL(r.valorJae) + '</td>' +
       '<td class="vt-calc vt-riocard">' + fmtBRL(r.valorRiocard) + '</td>' +
+      delCell +
       '</tr>';
   }).join('');
 }
@@ -876,7 +951,7 @@ function renderAdminTable() {
   document.getElementById('adminNoSel').style.display = rows.length ? 'none' : '';
   document.getElementById('admRecordsPill').textContent = fmtRegistros(rows.length);
 
-  body.innerHTML = renderRows(rows, state.period);
+  body.innerHTML = renderRows(rows, state.period, 'admin');
   renderAddControl('admin');
   renderCopyButton('admin');
 }
@@ -888,7 +963,7 @@ function renderDocenteTable() {
   document.getElementById('docenteNoSel').style.display = rows.length ? 'none' : '';
   document.getElementById('docRecordsPill').textContent = fmtRegistros(rows.length);
 
-  body.innerHTML = renderRows(rows, state.period);
+  body.innerHTML = renderRows(rows, state.period, 'docente');
   renderAddControl('docente');
   renderCopyButton('docente');
 }
@@ -961,8 +1036,11 @@ function copyFromPreviousMonth(type) {
       matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
       tipoIda: r.tipoIda, valorIda: r.valorIda, qtdIda: r.qtdIda,
       tipoVolta: r.tipoVolta, valorVolta: r.valorVolta, qtdVolta: r.qtdVolta,
+      tipoIda2: r.tipoIda2 || '', valorIda2: r.valorIda2 || 0,
+      tipoVolta2: r.tipoVolta2 || '', valorVolta2: r.valorVolta2 || 0,
       total: r.total, diasTrabalhados: r.diasTrabalhados, valorDiario: r.valorDiario,
-      valorJae: r.valorJae, valorRiocard: r.valorRiocard
+      valorJae: r.valorJae, valorRiocard: r.valorRiocard,
+      _new: true
     });
   });
 
@@ -1044,12 +1122,116 @@ function addRow(type) {
     unidade: unidade, mes: target.mes, ano: target.ano, matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
     tipoIda: TIPOS[0], valorIda: 0, qtdIda: 0,
     tipoVolta: TIPOS[0], valorVolta: 0, qtdVolta: 0,
-    total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0
+    tipoIda2: '', valorIda2: 0, tipoVolta2: '', valorVolta2: 0,
+    total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0,
+    _new: true
   });
 
   rows.sort(function(a, b) { return (a.ano - b.ano) || (a.mes - b.mes) || a.unidade.localeCompare(b.unidade, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'); });
 
   if (isAdmin) renderAdminTable(); else renderDocenteTable();
+}
+
+// ── EXCLUIR LANÇAMENTO (só do período aberto) ──────────────────
+
+// Copia os valores editados no DOM de volta para o state antes de redesenhar,
+// para não perder edições ainda não salvas nas outras linhas.
+function syncDomToState(type) {
+  var isAdmin = type === 'admin';
+  var rows    = (isAdmin ? state.adminRows : state.docenteRows).filter(passesFilter);
+  var rowEls  = document.querySelectorAll(isAdmin ? '#adminTableBody tr' : '#docenteTableBody tr');
+  rows.forEach(function(r, i) {
+    if (!isOpenPeriod(r)) return;
+    var row = rowEls[i];
+    if (!row) return;
+    r.tipoIda     = rowValStr(row, 'vt-tipo-ida');
+    r.valorIda    = rowValNum(row, 'vt-valor-ida');
+    r.tipoIda2    = rowValStr(row, 'vt-tipo-ida2');
+    r.valorIda2   = rowValNum(row, 'vt-valor-ida2');
+    r.qtdIda      = rowValNum(row, 'vt-qtd-ida');
+    r.tipoVolta   = rowValStr(row, 'vt-tipo-volta');
+    r.valorVolta  = rowValNum(row, 'vt-valor-volta');
+    r.tipoVolta2  = rowValStr(row, 'vt-tipo-volta2');
+    r.valorVolta2 = rowValNum(row, 'vt-valor-volta2');
+    r.qtdVolta    = rowValNum(row, 'vt-qtd-volta');
+    recalcRow(r);
+  });
+}
+
+function recalcRow(r) {
+  var c = calcularVT(r);
+  r.total = c.total; r.diasTrabalhados = c.dias; r.valorDiario = c.valorDiario;
+  r.valorJae = c.jae; r.valorRiocard = c.riocard;
+}
+
+// ── 2º TRECHO (ida/volta): adiciona/remove os campos Tipo 2 / Valor 2 da linha ──
+
+function findFilteredRow(type, idx) {
+  var rows = type === 'admin' ? state.adminRows : state.docenteRows;
+  return rows.filter(passesFilter)[idx];
+}
+
+function rerenderTable(type) {
+  if (type === 'admin') renderAdminTable(); else renderDocenteTable();
+}
+
+function addLeg2(type, idx, sentido) {
+  syncDomToState(type); // preserva edições não salvas das outras linhas
+  var r = findFilteredRow(type, idx);
+  if (!r) return;
+  if (sentido === 'ida') { r.tipoIda2 = TIPOS[0]; r.valorIda2 = 0; }
+  else                   { r.tipoVolta2 = TIPOS[0]; r.valorVolta2 = 0; }
+  rerenderTable(type);
+}
+
+function removeLeg2(type, idx, sentido) {
+  syncDomToState(type);
+  var r = findFilteredRow(type, idx);
+  if (!r) return;
+  if (sentido === 'ida') { r.tipoIda2 = ''; r.valorIda2 = 0; }
+  else                   { r.tipoVolta2 = ''; r.valorVolta2 = 0; }
+  recalcRow(r); // o total muda ao remover o trecho
+  rerenderTable(type);
+}
+
+function deleteRow(type, idx) {
+  var isAdmin  = type === 'admin';
+  var rows     = isAdmin ? state.adminRows : state.docenteRows;
+  var filtered = rows.filter(passesFilter);
+  var r        = filtered[idx];
+  if (!r) return;
+
+  var msg = 'Excluir o lançamento de ' + r.nome + ' (' + MESES[r.mes - 1] + ' / ' + r.ano + ')?';
+  if (!window.confirm(msg)) return;
+
+  syncDomToState(type);
+
+  function removeAndRender() {
+    var pos = rows.indexOf(r);
+    if (pos !== -1) rows.splice(pos, 1);
+    if (isAdmin) renderAdminTable(); else renderDocenteTable();
+  }
+
+  // Linha ainda não salva na planilha: basta remover da tela
+  if (r._new) {
+    removeAndRender();
+    setStatus('Linha removida.', 'success');
+    return;
+  }
+
+  setStatus('Excluindo...', 'saving');
+  google.script.run
+    .withSuccessHandler(function() {
+      removeAndRender();
+      setStatus('Lançamento excluído com sucesso!', 'success');
+    })
+    .withFailureHandler(function(err) {
+      setStatus('Erro: ' + (err.message || err), 'error');
+    })
+    .deleteVTEntry({
+      token: TOKEN, categoria: type,
+      unidade: r.unidade, mes: r.mes, ano: r.ano, matricula: r.matricula
+    });
 }
 
 
@@ -1151,7 +1333,9 @@ function collectEntries(rowsFiltered, rowEls) {
     out.push({
       unidade: r.unidade, matricula: r.matricula, cpf: r.cpf, nome: r.nome, mes: r.mes, ano: r.ano,
       tipoIda:   rowValStr(row, 'vt-tipo-ida'),   valorIda:   rowValNum(row, 'vt-valor-ida'),   qtdIda:   rowValNum(row, 'vt-qtd-ida'),
-      tipoVolta: rowValStr(row, 'vt-tipo-volta'), valorVolta: rowValNum(row, 'vt-valor-volta'), qtdVolta: rowValNum(row, 'vt-qtd-volta')
+      tipoVolta: rowValStr(row, 'vt-tipo-volta'), valorVolta: rowValNum(row, 'vt-valor-volta'), qtdVolta: rowValNum(row, 'vt-qtd-volta'),
+      tipoIda2:   rowValStr(row, 'vt-tipo-ida2'),   valorIda2:   rowValNum(row, 'vt-valor-ida2'),
+      tipoVolta2: rowValStr(row, 'vt-tipo-volta2'), valorVolta2: rowValNum(row, 'vt-valor-volta2')
     });
   });
   return out;
