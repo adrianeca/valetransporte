@@ -8,8 +8,13 @@ const HUB_SS_ID      = '1eZPbzhzjhjHoPwMhAW5YvOZgYiAvlTYc07dRan6Lyoc';
 const MEU_ACESSO     = 'webvt';
 const HUB_URL        = 'https://script.google.com/a/macros/brasas.com/s/AKfycbyF7BArYMYFtcQY7_4RTGGPw89yNohAjR7eGptItP-EsnWhNfiZR2ISRaHdAkwlLSlr/exec';
 
-// v1 ainda não cobre São Paulo (regras de Bilhete Único pendentes) — só a unidade VO é de SP hoje
-const UNIDADE_FORA_DE_ESCOPO = 'VO';
+// Unidades de SP (hoje só VO) não têm cartões Jaé/RioCard: usam os mesmos tipos de
+// transporte do RJ, mas sem rateio — o valor final a pagar é a coluna Total.
+const UNIDADES_SEM_RATEIO = ['VO'];
+
+function isSemRateio_(unidade) {
+  return UNIDADES_SEM_RATEIO.some(function(u) { return norm_(u) === norm_(unidade); });
+}
 
 // Índices das colunas na planilha de funcionários (base 0)
 const COL = {
@@ -135,8 +140,7 @@ function isUserAllowedUnit_(user, unit) {
 }
 
 // Todas as unidades que o usuário pode ver: as dele (se restrito) ou todas que existem
-// (com funcionário ativo cadastrado OU já com lançamento na planilha de VT), exceto a(s)
-// unidade(s) ainda fora do escopo (ver UNIDADE_FORA_DE_ESCOPO).
+// (com funcionário ativo cadastrado OU já com lançamento na planilha de VT).
 function getAllowedUnidades_(user) {
   const set = {};
 
@@ -164,10 +168,6 @@ function getAllowedUnidades_(user) {
       }
     });
   }
-
-  Object.keys(set).forEach(function(u) {
-    if (norm_(u) === norm_(UNIDADE_FORA_DE_ESCOPO)) delete set[u];
-  });
 
   const result = Object.keys(set).sort();
   if (!result.length) throw new Error('Vale Transporte ainda não está disponível para sua unidade.');
@@ -453,9 +453,13 @@ function calcularVT_(e) {
     { tipo: e.tipoVolta2, total: (Number(e.valorVolta2) || 0) * qtdVolta }
   ];
 
+  // Unidades sem rateio (SP): não há cartão Jaé/RioCard — só o Total vale
+  const semRateio = isSemRateio_(e.unidade);
+
   let total = 0, valorJae = 0, valorRiocard = 0;
   legs.forEach(function(l) {
     total += l.total;
+    if (semRateio) return;
     const cartao = classificarCartao_(l.tipo);
     if (cartao === 'jae')     valorJae     += l.total;
     if (cartao === 'riocard') valorRiocard += l.total;

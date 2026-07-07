@@ -91,8 +91,8 @@ body{font-family:var(--font);background:var(--gray-100);color:var(--navy-800);mi
 .user-badge-name {font-size:.82rem;font-weight:600;color:#fff}
 .user-badge-unit {font-size:.7rem;color:var(--navy-300)}
 
-/* BODY */
-.app-body {flex:1;padding:28px 32px;max-width:1440px;width:100%;margin:0 auto}
+/* BODY — sem max-width: a tabela de lançamentos é larga e deve usar a tela toda */
+.app-body {flex:1;padding:28px 32px;width:100%;margin:0 auto}
 
 /* STAT PILLS */
 .stat-row {display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px}
@@ -183,7 +183,7 @@ input[type=number] {
   border:1px solid var(--gray-200);border-radius:7px;
   text-align:center;font-family:var(--font);font-size:.84rem;color:var(--navy-800);
   background:var(--white);transition:border-color .15s,box-shadow .15s;
-  -moz-appearance:textfield;
+  -moz-appearance:textfield;appearance:textfield;
 }
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
@@ -198,7 +198,7 @@ input[type=number]:disabled {
 
 /* FOOTER */
 .app-footer {
-  padding:20px 32px;max-width:1440px;width:100%;margin:0 auto;
+  padding:20px 32px;width:100%;margin:0 auto;
   display:flex;align-items:center;justify-content:flex-end;gap:14px;
 }
 .save-btn {
@@ -286,21 +286,25 @@ input[type=number]:disabled {
   width:100%;border-collapse:collapse;font-size:.83rem;margin-bottom:16px;
 }
 .hist-table th, .hist-table td {
-  padding:10px 14px;text-align:center;
+  padding:10px 12px;text-align:center;
   border-bottom:1px solid var(--gray-200);
 }
 .hist-table th {
-  background:none;color:var(--gray-400);font-weight:700;
+  background:var(--navy-800);color:#fff;font-weight:700;
   font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;
-  border-bottom:2px solid var(--gray-200);
+  padding:9px 8px;border-bottom:1px solid var(--navy-600);
+  border-left:1px solid rgba(255,255,255,.08);
 }
+.hist-table th:first-child {border-left:none}
+/* 2ª linha do cabeçalho (Tipo/Valor/Qtd de Ida e Volta) num tom mais claro */
+.hist-table thead tr:nth-child(2) th {background:var(--navy-700);color:var(--navy-100)}
 .hist-table td:first-child, .hist-table th:first-child {text-align:left}
 .hist-table td:nth-child(6), .hist-table th:nth-child(6) {text-align:left}
 .hist-table tbody tr:hover {background:var(--gray-50)}
 
-.entry-table td {padding:6px 8px}
+.entry-table td {padding:6px 6px}
 .entry-table select.vt-tipo-sel {
-  min-width:150px;padding:5px 8px;
+  min-width:132px;max-width:170px;padding:5px 6px;
   border:1px solid var(--gray-200);border-radius:6px;
   font-family:var(--font);font-size:.8rem;color:var(--navy-800);
   background:var(--white);outline:none;cursor:pointer;
@@ -578,6 +582,13 @@ var TIPOS = ['Ônibus municipal', 'Ônibus intermunicipal', 'Metrô', 'Barca', '
 var TIPOS_JAE     = ['onibus municipal', 'metro'];
 var TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem'];
 
+// Unidades de SP (hoje só VO) não têm cartões Jaé/RioCard: sem rateio, vale só o Total
+var UNIDADES_SEM_RATEIO = ['VO'];
+
+function isSemRateio(unidade) {
+  return UNIDADES_SEM_RATEIO.some(function(u) { return normStr(u) === normStr(unidade); });
+}
+
 var state = {
   user: null, period: null, funcs: null, counter: 0,
   availableUnits: [],
@@ -835,9 +846,13 @@ function calcularVT(v) {
     { tipo: v.tipoVolta2, total: (Number(v.valorVolta2) || 0) * qtdVolta }
   ];
 
+  // Unidades sem rateio (SP): não há cartão Jaé/RioCard — só o Total vale
+  var semRateio = isSemRateio(v.unidade);
+
   var total = 0, jae = 0, riocard = 0;
   legs.forEach(function(l) {
     total += l.total;
+    if (semRateio) return;
     var c = classificarCartao(l.tipo);
     if (c === 'jae') jae += l.total; else if (c === 'riocard') riocard += l.total;
   });
@@ -852,7 +867,9 @@ function fmtBRL(n) {
 
 function onVTRowInput(el) {
   var tr = el.closest('tr');
+  var unidade = tr.cells[0].textContent; // 1ª coluna da linha é a Unidade
   var c = calcularVT({
+    unidade:    unidade,
     tipoIda:    rowValStr(tr, 'vt-tipo-ida'),    valorIda:    rowValNum(tr, 'vt-valor-ida'),
     tipoIda2:   rowValStr(tr, 'vt-tipo-ida2'),   valorIda2:   rowValNum(tr, 'vt-valor-ida2'),
     qtdIda:     rowValNum(tr, 'vt-qtd-ida'),
@@ -860,11 +877,12 @@ function onVTRowInput(el) {
     tipoVolta2: rowValStr(tr, 'vt-tipo-volta2'), valorVolta2: rowValNum(tr, 'vt-valor-volta2'),
     qtdVolta:   rowValNum(tr, 'vt-qtd-volta')
   });
+  var semRateio = isSemRateio(unidade);
   tr.querySelector('.vt-total').textContent   = fmtBRL(c.total);
   tr.querySelector('.vt-dias').textContent    = c.dias;
   tr.querySelector('.vt-diario').textContent  = fmtBRL(c.valorDiario);
-  tr.querySelector('.vt-jae').textContent     = fmtBRL(c.jae);
-  tr.querySelector('.vt-riocard').textContent = fmtBRL(c.riocard);
+  tr.querySelector('.vt-jae').textContent     = semRateio ? '—' : fmtBRL(c.jae);
+  tr.querySelector('.vt-riocard').textContent = semRateio ? '—' : fmtBRL(c.riocard);
 }
 
 // ── TABELAS DE PREENCHIMENTO (mostra só o que já foi lançado; "+ Adicionar" cria linha nova) ──
@@ -937,8 +955,8 @@ function renderRows(rows, p, type) {
       '<td class="vt-calc vt-total">' + fmtBRL(r.total) + '</td>' +
       '<td class="vt-calc vt-dias">' + (Number(r.diasTrabalhados) || 0) + '</td>' +
       '<td class="vt-calc vt-diario">' + fmtBRL(r.valorDiario) + '</td>' +
-      '<td class="vt-calc vt-jae">' + fmtBRL(r.valorJae) + '</td>' +
-      '<td class="vt-calc vt-riocard">' + fmtBRL(r.valorRiocard) + '</td>' +
+      '<td class="vt-calc vt-jae">' + (isSemRateio(r.unidade) ? '—' : fmtBRL(r.valorJae)) + '</td>' +
+      '<td class="vt-calc vt-riocard">' + (isSemRateio(r.unidade) ? '—' : fmtBRL(r.valorRiocard)) + '</td>' +
       delCell +
       '</tr>';
   }).join('');
