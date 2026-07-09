@@ -50,6 +50,15 @@ function parseMes_(v) {
   return parseInt(String(v).trim(), 10) || 0;
 }
 
+// Padrão de escrita do mês na planilha: "06 Junho", "07 Julho"...
+const MESES_LABEL = ['01 Janeiro', '02 Fevereiro', '03 Março', '04 Abril', '05 Maio', '06 Junho',
+                     '07 Julho', '08 Agosto', '09 Setembro', '10 Outubro', '11 Novembro', '12 Dezembro'];
+
+function mesLabel_(m) {
+  const n = parseMes_(m);
+  return MESES_LABEL[n - 1] || String(m);
+}
+
 // Coluna ATIVO (K) guarda o texto "Ativo"/"Inativo" (às vezes true/false, sim/não)
 function isInativo_(v) {
   const n = norm_(v);
@@ -273,6 +282,22 @@ function criarLiberacao(token, email) {
   return getLiberacoes(token);
 }
 
+// Busca o nome cadastrado no Hub (SESSOES) para personalizar o e-mail. Vazio se não achar.
+function findNomeByEmail_(email) {
+  try {
+    const sheet = SpreadsheetApp.openById(HUB_SS_ID).getSheetByName('SESSOES');
+    if (!sheet) return '';
+    const rows      = sheet.getDataRange().getValues();
+    const emailNorm = norm_(email);
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (norm_(rows[i][1]) === emailNorm && rows[i][2]) return String(rows[i][2]).trim();
+    }
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
 // Avisa por e-mail quem recebeu a liberação. Falha de envio não deve derrubar a liberação em si.
 function enviarEmailLiberacao_(email, criadoEm, expira) {
   try {
@@ -283,10 +308,12 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
     };
     const criadoStr = fmtDT(criadoEm);
     const expiraStr = fmtDT(expira);
+    const nome      = findNomeByEmail_(email);
 
     const assunto = 'Liberação temporária de edição — Vale Transporte';
 
     const corpoTexto =
+      'Olá' + (nome ? ', ' + nome.toUpperCase() : '') + '.\n\n' +
       'Você recebeu uma liberação temporária de 24 horas para editar o Vale Transporte fora do prazo normal, ' +
       'concedida pelo Departamento Pessoal.\n\n' +
       'Concedida em: ' + criadoStr + '\n' +
@@ -311,7 +338,8 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
               '&#9888;&#65039; Este é um comunicado automático. <strong>Não responda este e-mail</strong> — em caso de dúvidas, entre em contato com o Departamento Pessoal pelo endereço <a href="mailto:dp@brasas.com" style="color:#2a4d76">dp@brasas.com</a>.' +
             '</div>' +
 
-            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035">Olá,</p>' +
+            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035">Olá' +
+              (nome ? ', <strong>' + nome.toUpperCase() + '</strong>' : '') + '.</p>' +
 
             '<p style="margin:0 0 22px;font-size:15px;color:#0f2035;line-height:1.6">' +
               'Você recebeu uma liberação temporária de <strong>24 horas</strong> para editar o ' +
@@ -574,7 +602,7 @@ function _upsertRows_(sheet, entries, valuesFn) {
     if (map[key]) {
       sheet.getRange(map[key], 7, 1, values.length).setValues([values]);
     } else {
-      sheet.appendRow([e.unidade, e.mes, e.ano, mat, e.cpf || '', e.nome].concat(values));
+      sheet.appendRow([e.unidade, mesLabel_(e.mes), e.ano, mat, e.cpf || '', e.nome].concat(values));
       map[key] = sheet.getLastRow();
     }
   });
