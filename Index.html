@@ -262,7 +262,7 @@ input[type=number]:disabled {
 }
 .row-del-btn:hover {background:var(--danger-100);color:var(--danger-600)}
 
-/* 2º trecho de transporte (ida/volta): campos empilhados na mesma célula */
+/* Trechos extras de transporte (ida/volta): campos empilhados na mesma célula */
 .leg-stack {display:flex;flex-direction:column;gap:4px;align-items:stretch}
 .leg-row   {display:flex;align-items:center;gap:4px}
 .leg-add-btn {
@@ -312,6 +312,7 @@ input[type=number]:disabled {
 .entry-table select.vt-tipo-sel:disabled {background:var(--gray-100);color:var(--gray-400);cursor:not-allowed}
 .entry-table input.vt-valor {width:68px}
 .entry-table input.vt-qtd   {width:52px}
+.money-prefix {font-size:.78rem;font-weight:600;color:var(--gray-400);flex-shrink:0}
 .vt-calc {font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--navy-700);font-weight:600}
 
 .add-row-bar {
@@ -655,6 +656,11 @@ function onFuncsLoaded(funcs) {
 function onVTLoaded(data) {
   state.adminRows   = data.administrativo || [];
   state.docenteRows = data.docente        || [];
+  // As colunas calculadas gravadas podem ter vindo de uma fórmula antiga; no período
+  // aberto (ainda editável) recalcula ao carregar para exibir sempre a fórmula vigente.
+  state.adminRows.concat(state.docenteRows).forEach(function(r) {
+    if (isOpenPeriod(r)) recalcRow(r);
+  });
   renderUI();
 }
 
@@ -833,8 +839,8 @@ function classificarCartao(tipo) {
 }
 
 // Recebe um objeto com os mesmos nomes de campos das linhas do state
-// (tipoIda, valorIda, tipoIda2, valorIda2, qtdIda, e os equivalentes de volta).
-// Até 2 trechos por sentido; o 2º trecho usa a MESMA Qtd do 1º — soma no total, não nos dias.
+// (tipoIda, valorIda, tipoIda2, valorIda2, tipoIda3, valorIda3, qtdIda, e os equivalentes de volta).
+// Até 3 trechos por sentido; os trechos extras usam a MESMA Qtd do 1º — somam no total, não nos dias.
 function calcularVT(v) {
   var qtdIda   = Number(v.qtdIda)   || 0;
   var qtdVolta = Number(v.qtdVolta) || 0;
@@ -842,8 +848,10 @@ function calcularVT(v) {
   var legs = [
     { tipo: v.tipoIda,    total: (Number(v.valorIda)    || 0) * qtdIda },
     { tipo: v.tipoIda2,   total: (Number(v.valorIda2)   || 0) * qtdIda },
+    { tipo: v.tipoIda3,   total: (Number(v.valorIda3)   || 0) * qtdIda },
     { tipo: v.tipoVolta,  total: (Number(v.valorVolta)  || 0) * qtdVolta },
-    { tipo: v.tipoVolta2, total: (Number(v.valorVolta2) || 0) * qtdVolta }
+    { tipo: v.tipoVolta2, total: (Number(v.valorVolta2) || 0) * qtdVolta },
+    { tipo: v.tipoVolta3, total: (Number(v.valorVolta3) || 0) * qtdVolta }
   ];
 
   // Unidades sem rateio (SP): não há cartão Jaé/RioCard — só o Total vale
@@ -857,7 +865,9 @@ function calcularVT(v) {
     if (c === 'jae') jae += l.total; else if (c === 'riocard') riocard += l.total;
   });
 
-  var dias = qtdIda + qtdVolta;
+  // Dias trabalhados = dias do mês (ida e volta acontecem no mesmo dia),
+  // então usa a maior Qtd; o valor diário é o custo do dia completo (ida + volta).
+  var dias = Math.max(qtdIda, qtdVolta);
   return { total: total, dias: dias, valorDiario: dias > 0 ? total / dias : 0, jae: jae, riocard: riocard };
 }
 
@@ -872,9 +882,11 @@ function onVTRowInput(el) {
     unidade:    unidade,
     tipoIda:    rowValStr(tr, 'vt-tipo-ida'),    valorIda:    rowValNum(tr, 'vt-valor-ida'),
     tipoIda2:   rowValStr(tr, 'vt-tipo-ida2'),   valorIda2:   rowValNum(tr, 'vt-valor-ida2'),
+    tipoIda3:   rowValStr(tr, 'vt-tipo-ida3'),   valorIda3:   rowValNum(tr, 'vt-valor-ida3'),
     qtdIda:     rowValNum(tr, 'vt-qtd-ida'),
     tipoVolta:  rowValStr(tr, 'vt-tipo-volta'),  valorVolta:  rowValNum(tr, 'vt-valor-volta'),
     tipoVolta2: rowValStr(tr, 'vt-tipo-volta2'), valorVolta2: rowValNum(tr, 'vt-valor-volta2'),
+    tipoVolta3: rowValStr(tr, 'vt-tipo-volta3'), valorVolta3: rowValNum(tr, 'vt-valor-volta3'),
     qtdVolta:   rowValNum(tr, 'vt-qtd-volta')
   });
   var semRateio = isSemRateio(unidade);
@@ -899,35 +911,45 @@ function numInputHtml(cls, extraCls, val, editable, step) {
     (Number(val) || 0) + '"' + (editable ? ' oninput="onVTRowInput(this)"' : ' disabled') + '>';
 }
 
-// Célula de Tipo do sentido (ida/volta): trecho 1 sempre; trecho 2 empilhado quando existe.
-// Quando editável, mostra "+" para adicionar o 2º trecho ou "×" para removê-lo.
+// Célula de Tipo do sentido (ida/volta): trecho 1 sempre; trechos 2 e 3 empilhados quando existem.
+// Quando editável, o último trecho mostra "+" para adicionar o próximo (até 3) e "×" para removê-lo.
 function tipoCell(type, i, sentido, r, open) {
   var isIda = sentido === 'ida';
-  var tipo1 = isIda ? r.tipoIda  : r.tipoVolta;
-  var tipo2 = isIda ? r.tipoIda2 : r.tipoVolta2;
   var cls1  = isIda ? 'vt-tipo-ida' : 'vt-tipo-volta';
+  var tipos = isIda ? [r.tipoIda, r.tipoIda2, r.tipoIda3] : [r.tipoVolta, r.tipoVolta2, r.tipoVolta3];
+  var nLegs = tipos[2] ? 3 : (tipos[1] ? 2 : 1);
 
   var html = '<td><div class="leg-stack">';
-  if (tipo2) {
-    html += '<div class="leg-row">' + tipoSelectHtml(cls1, tipo1, open) + '</div>' +
-      '<div class="leg-row">' + tipoSelectHtml(cls1 + '2', tipo2, open) +
-      (open ? '<button type="button" class="leg-del-btn" title="Remover 2º meio de transporte" onclick="removeLeg2(\'' + type + '\',' + i + ',\'' + sentido + '\')">×</button>' : '') +
-      '</div>';
-  } else {
-    html += '<div class="leg-row">' + tipoSelectHtml(cls1, tipo1, open) +
-      (open ? '<button type="button" class="leg-add-btn" title="Adicionar 2º meio de transporte" onclick="addLeg2(\'' + type + '\',' + i + ',\'' + sentido + '\')">+</button>' : '') +
-      '</div>';
+  for (var n = 1; n <= nLegs; n++) {
+    var cls  = n === 1 ? cls1 : cls1 + n;
+    var last = n === nLegs;
+    html += '<div class="leg-row">' + tipoSelectHtml(cls, tipos[n - 1], open);
+    if (open && last && n > 1) {
+      html += '<button type="button" class="leg-del-btn" title="Remover ' + n + 'º meio de transporte" onclick="removeLeg(\'' + type + '\',' + i + ',\'' + sentido + '\')">×</button>';
+    }
+    if (open && last && n < 3) {
+      html += '<button type="button" class="leg-add-btn" title="Adicionar ' + (n + 1) + 'º meio de transporte" onclick="addLeg(\'' + type + '\',' + i + ',\'' + sentido + '\')">+</button>';
+    }
+    html += '</div>';
   }
   return html + '</div></td>';
 }
 
-// Célula de Valor do sentido: um input por trecho existente
+// Célula de Valor do sentido: um input por trecho existente, com prefixo R$
+function moneyInputHtml(cls, val, editable) {
+  return '<div class="leg-row"><span class="money-prefix">R$</span>' +
+    numInputHtml(cls, 'vt-valor', val, editable, '0.01') + '</div>';
+}
+
 function valorCell(sentido, r, open) {
   var isIda = sentido === 'ida';
   var cls1  = isIda ? 'vt-valor-ida' : 'vt-valor-volta';
-  var html  = '<td><div class="leg-stack">' + numInputHtml(cls1, 'vt-valor', isIda ? r.valorIda : r.valorVolta, open, '0.01');
+  var html  = '<td><div class="leg-stack">' + moneyInputHtml(cls1, isIda ? r.valorIda : r.valorVolta, open);
   if (isIda ? r.tipoIda2 : r.tipoVolta2) {
-    html += numInputHtml(cls1 + '2', 'vt-valor', isIda ? r.valorIda2 : r.valorVolta2, open, '0.01');
+    html += moneyInputHtml(cls1 + '2', isIda ? r.valorIda2 : r.valorVolta2, open);
+  }
+  if (isIda ? r.tipoIda3 : r.tipoVolta3) {
+    html += moneyInputHtml(cls1 + '3', isIda ? r.valorIda3 : r.valorVolta3, open);
   }
   return html + '</div></td>';
 }
@@ -1056,6 +1078,8 @@ function copyFromPreviousMonth(type) {
       tipoVolta: r.tipoVolta, valorVolta: r.valorVolta, qtdVolta: r.qtdVolta,
       tipoIda2: r.tipoIda2 || '', valorIda2: r.valorIda2 || 0,
       tipoVolta2: r.tipoVolta2 || '', valorVolta2: r.valorVolta2 || 0,
+      tipoIda3: r.tipoIda3 || '', valorIda3: r.valorIda3 || 0,
+      tipoVolta3: r.tipoVolta3 || '', valorVolta3: r.valorVolta3 || 0,
       total: r.total, diasTrabalhados: r.diasTrabalhados, valorDiario: r.valorDiario,
       valorJae: r.valorJae, valorRiocard: r.valorRiocard,
       _new: true
@@ -1141,6 +1165,7 @@ function addRow(type) {
     tipoIda: TIPOS[0], valorIda: 0, qtdIda: 0,
     tipoVolta: TIPOS[0], valorVolta: 0, qtdVolta: 0,
     tipoIda2: '', valorIda2: 0, tipoVolta2: '', valorVolta2: 0,
+    tipoIda3: '', valorIda3: 0, tipoVolta3: '', valorVolta3: 0,
     total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0,
     _new: true
   });
@@ -1166,11 +1191,15 @@ function syncDomToState(type) {
     r.valorIda    = rowValNum(row, 'vt-valor-ida');
     r.tipoIda2    = rowValStr(row, 'vt-tipo-ida2');
     r.valorIda2   = rowValNum(row, 'vt-valor-ida2');
+    r.tipoIda3    = rowValStr(row, 'vt-tipo-ida3');
+    r.valorIda3   = rowValNum(row, 'vt-valor-ida3');
     r.qtdIda      = rowValNum(row, 'vt-qtd-ida');
     r.tipoVolta   = rowValStr(row, 'vt-tipo-volta');
     r.valorVolta  = rowValNum(row, 'vt-valor-volta');
     r.tipoVolta2  = rowValStr(row, 'vt-tipo-volta2');
     r.valorVolta2 = rowValNum(row, 'vt-valor-volta2');
+    r.tipoVolta3  = rowValStr(row, 'vt-tipo-volta3');
+    r.valorVolta3 = rowValNum(row, 'vt-valor-volta3');
     r.qtdVolta    = rowValNum(row, 'vt-qtd-volta');
     recalcRow(r);
   });
@@ -1182,7 +1211,7 @@ function recalcRow(r) {
   r.valorJae = c.jae; r.valorRiocard = c.riocard;
 }
 
-// ── 2º TRECHO (ida/volta): adiciona/remove os campos Tipo 2 / Valor 2 da linha ──
+// ── TRECHOS EXTRAS (ida/volta): adiciona/remove os campos Tipo 2/3 e Valor 2/3 da linha ──
 
 function findFilteredRow(type, idx) {
   var rows = type === 'admin' ? state.adminRows : state.docenteRows;
@@ -1193,21 +1222,33 @@ function rerenderTable(type) {
   if (type === 'admin') renderAdminTable(); else renderDocenteTable();
 }
 
-function addLeg2(type, idx, sentido) {
+// Preenche o próximo trecho vago (2º, depois 3º) do sentido
+function addLeg(type, idx, sentido) {
   syncDomToState(type); // preserva edições não salvas das outras linhas
   var r = findFilteredRow(type, idx);
   if (!r) return;
-  if (sentido === 'ida') { r.tipoIda2 = TIPOS[0]; r.valorIda2 = 0; }
-  else                   { r.tipoVolta2 = TIPOS[0]; r.valorVolta2 = 0; }
+  if (sentido === 'ida') {
+    if (!r.tipoIda2) { r.tipoIda2 = TIPOS[0]; r.valorIda2 = 0; }
+    else             { r.tipoIda3 = TIPOS[0]; r.valorIda3 = 0; }
+  } else {
+    if (!r.tipoVolta2) { r.tipoVolta2 = TIPOS[0]; r.valorVolta2 = 0; }
+    else               { r.tipoVolta3 = TIPOS[0]; r.valorVolta3 = 0; }
+  }
   rerenderTable(type);
 }
 
-function removeLeg2(type, idx, sentido) {
+// Remove o último trecho preenchido (3º, senão o 2º) do sentido
+function removeLeg(type, idx, sentido) {
   syncDomToState(type);
   var r = findFilteredRow(type, idx);
   if (!r) return;
-  if (sentido === 'ida') { r.tipoIda2 = ''; r.valorIda2 = 0; }
-  else                   { r.tipoVolta2 = ''; r.valorVolta2 = 0; }
+  if (sentido === 'ida') {
+    if (r.tipoIda3) { r.tipoIda3 = ''; r.valorIda3 = 0; }
+    else            { r.tipoIda2 = ''; r.valorIda2 = 0; }
+  } else {
+    if (r.tipoVolta3) { r.tipoVolta3 = ''; r.valorVolta3 = 0; }
+    else              { r.tipoVolta2 = ''; r.valorVolta2 = 0; }
+  }
   recalcRow(r); // o total muda ao remover o trecho
   rerenderTable(type);
 }
@@ -1353,7 +1394,9 @@ function collectEntries(rowsFiltered, rowEls) {
       tipoIda:   rowValStr(row, 'vt-tipo-ida'),   valorIda:   rowValNum(row, 'vt-valor-ida'),   qtdIda:   rowValNum(row, 'vt-qtd-ida'),
       tipoVolta: rowValStr(row, 'vt-tipo-volta'), valorVolta: rowValNum(row, 'vt-valor-volta'), qtdVolta: rowValNum(row, 'vt-qtd-volta'),
       tipoIda2:   rowValStr(row, 'vt-tipo-ida2'),   valorIda2:   rowValNum(row, 'vt-valor-ida2'),
-      tipoVolta2: rowValStr(row, 'vt-tipo-volta2'), valorVolta2: rowValNum(row, 'vt-valor-volta2')
+      tipoVolta2: rowValStr(row, 'vt-tipo-volta2'), valorVolta2: rowValNum(row, 'vt-valor-volta2'),
+      tipoIda3:   rowValStr(row, 'vt-tipo-ida3'),   valorIda3:   rowValNum(row, 'vt-valor-ida3'),
+      tipoVolta3: rowValStr(row, 'vt-tipo-volta3'), valorVolta3: rowValNum(row, 'vt-valor-volta3')
     });
   });
   return out;
