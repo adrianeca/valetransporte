@@ -214,8 +214,8 @@ function getCurrentPeriod(token) {
   let previstoAno = ano;
   if (previstoMes > 12) { previstoMes = 1; previstoAno++; }
 
-  // DEV: bloqueio desativado — restaurar para: let locked = now.getDate() > 11;
-  let locked = false;
+  // Aberto até o dia 11; a partir do dia 12 o período bloqueia automaticamente
+  let locked = now.getDate() > 11;
 
   // Liberação temporária (válida até 23:59 do dia da concessão) ignora o bloqueio para esse usuário
   if (locked) {
@@ -852,9 +852,9 @@ function getVTData(token) {
 // =============================================================================
 
 function saveVTData(payload) {
-  // DEV: validação de bloqueio desativada — restaurar após testes:
-  // const period = getCurrentPeriod();
-  // if (period.locked) throw new Error('O período está bloqueado. Prazo encerrado no dia 11.');
+  // Passa o token para que uma liberação ativa do usuário destrave o salvamento
+  const period = getCurrentPeriod(payload.token);
+  if (period.locked) throw new Error('O período está bloqueado. Prazo encerrado no dia 11.');
 
   const user = getSessionUser_(payload.token);
   if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
@@ -947,15 +947,12 @@ function recalcularTudo() {
 // =============================================================================
 
 function deleteVTEntry(payload) {
-  // DEV: validação de bloqueio desativada — restaurar após testes:
-  // const period = getCurrentPeriod(payload.token);
-  // if (period.locked) throw new Error('O período está bloqueado. Prazo encerrado no dia 11.');
-
   const user = getSessionUser_(payload.token);
   if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
   if (!isUserAllowedUnit_(user, payload.unidade)) throw new Error('Você não tem permissão para esta unidade.');
 
   const period = getCurrentPeriod(payload.token);
+  if (period.locked) throw new Error('O período está bloqueado. Prazo encerrado no dia 11.');
   if (Number(payload.mes) !== period.previsto.mes || Number(payload.ano) !== period.previsto.ano) {
     throw new Error('Só é possível excluir lançamentos do período vigente.');
   }
