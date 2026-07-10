@@ -8,6 +8,17 @@ const HUB_SS_ID      = '1eZPbzhzjhjHoPwMhAW5YvOZgYiAvlTYc07dRan6Lyoc';
 const MEU_ACESSO     = 'webvt';
 const HUB_URL        = 'https://script.google.com/a/macros/brasas.com/s/AKfycbyF7BArYMYFtcQY7_4RTGGPw89yNohAjR7eGptItP-EsnWhNfiZR2ISRaHdAkwlLSlr/exec';
 
+// E-mail que recebe as solicitações de liberação feitas pelos diretores
+const DP_EMAIL = 'dp@brasas.com';
+
+// Motivos que o diretor pode selecionar ao pedir liberação (AJUSTAR: lista provisória)
+const MOTIVOS_LIBERACAO = [
+  'Esqueci de lançar dentro do prazo',
+  'Correção de lançamento com erro',
+  'Funcionário admitido após o fechamento',
+  'Outro'
+];
+
 // Unidades de SP (hoje só VO) não têm cartões Jaé/RioCard: usam os mesmos tipos de
 // transporte do RJ, mas sem rateio — o valor final a pagar é a coluna Total.
 const UNIDADES_SEM_RATEIO = ['VO'];
@@ -206,7 +217,7 @@ function getCurrentPeriod(token) {
   // DEV: bloqueio desativado — restaurar para: let locked = now.getDate() > 11;
   let locked = false;
 
-  // Liberação temporária (24h) concedida por um admin ignora o bloqueio para esse usuário
+  // Liberação temporária (válida até 23:59 do dia da concessão) ignora o bloqueio para esse usuário
   if (locked) {
     const user = getSessionUser_(token);
     if (user && hasActiveLiberacao_(user.email)) locked = false;
@@ -219,7 +230,7 @@ function getCurrentPeriod(token) {
 }
 
 // =============================================================================
-// LIBERAÇÕES TEMPORÁRIAS DE EDIÇÃO (24h) — restrito a admins
+// LIBERAÇÕES TEMPORÁRIAS DE EDIÇÃO (até 23:59 do dia) — restrito a admins
 // =============================================================================
 
 // Colunas: Email | Liberado Por | Criado Em | Expira Em
@@ -267,7 +278,7 @@ function getLiberacoes(token) {
   return list;
 }
 
-// Concede 24h de edição liberada para um e-mail — só admins podem chamar
+// Concede edição liberada até 23:59 do dia da concessão — só admins podem chamar
 function criarLiberacao(token, email) {
   const admin = requireAdmin_(token);
 
@@ -275,7 +286,7 @@ function criarLiberacao(token, email) {
   if (!email || email.indexOf('@') === -1) throw new Error('Informe um e-mail válido.');
 
   const now    = new Date();
-  const expira = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const expira = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
   getLiberacoesSheet_().appendRow([email, admin.email, now, expira]);
   enviarEmailLiberacao_(email, now, expira);
@@ -314,12 +325,13 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
 
     const corpoTexto =
       'Olá' + (nome ? ', ' + nome.toUpperCase() : '') + '.\n\n' +
-      'Você recebeu uma liberação temporária de 24 horas para editar o Vale Transporte fora do prazo normal, ' +
+      'Você recebeu uma liberação temporária para editar o Vale Transporte fora do prazo normal, ' +
       'concedida pelo Departamento Pessoal.\n\n' +
+      'ATENÇÃO: a liberação vale SOMENTE HOJE, até as 23:59. Amanhã a edição já estará bloqueada novamente.\n\n' +
       'Concedida em: ' + criadoStr + '\n' +
-      'Válida até: ' + expiraStr + '\n\n' +
+      'Válida até: ' + expiraStr + ' (hoje)\n\n' +
       'Acesse pelo Hub BRASAS BI: ' + HUB_URL + '\n\n' +
-      'Após esse prazo, a edição volta a ficar bloqueada automaticamente.\n\n' +
+      'Após esse horário, a edição volta a ficar bloqueada automaticamente.\n\n' +
       'Equipe BRASAS BI';
 
     const corpoHtml =
@@ -341,10 +353,14 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
             '<p style="margin:0 0 14px;font-size:15px;color:#0f2035">Olá' +
               (nome ? ', <strong>' + nome.toUpperCase() + '</strong>' : '') + '.</p>' +
 
-            '<p style="margin:0 0 22px;font-size:15px;color:#0f2035;line-height:1.6">' +
-              'Você recebeu uma liberação temporária de <strong>24 horas</strong> para editar o ' +
+            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035;line-height:1.6">' +
+              'Você recebeu uma liberação temporária para editar o ' +
               '<strong>Vale Transporte</strong> fora do prazo normal (dia 11).' +
             '</p>' +
+
+            '<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:14px;color:#92400e;line-height:1.5">' +
+              '&#9200; A liberação vale <strong>somente hoje, até as 23:59</strong>. Amanhã a edição já estará bloqueada novamente.' +
+            '</div>' +
 
             '<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:18px 20px;margin-bottom:24px">' +
               '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:14px">Dados da liberação</div>' +
@@ -359,7 +375,7 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
                 '</tr>' +
                 '<tr>' +
                   '<td style="padding:6px 0;color:#64748b">Válida até:</td>' +
-                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + expiraStr + '</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + expiraStr + ' (hoje)</td>' +
                 '</tr>' +
               '</table>' +
             '</div>' +
@@ -371,7 +387,7 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
             '</div>' +
 
             '<p style="margin:20px 0 0;font-size:12.5px;color:#94a3b8;text-align:center">' +
-              'Após o prazo acima, a edição volta a ficar bloqueada automaticamente.' +
+              'Após as 23:59 de hoje, a edição volta a ficar bloqueada automaticamente.' +
             '</p>' +
 
           '</div>' +
@@ -381,6 +397,285 @@ function enviarEmailLiberacao_(email, criadoEm, expira) {
     MailApp.sendEmail(email, assunto, corpoTexto, { htmlBody: corpoHtml, name: 'Vale Transporte — BRASAS BI' });
   } catch (e) {
     Logger.log('enviarEmailLiberacao_: falha ao enviar e-mail para ' + email + ' — ' + e);
+  }
+}
+
+// =============================================================================
+// SOLICITAÇÕES DE LIBERAÇÃO — diretor pede pelo painel, DP aprova ou reprova
+// =============================================================================
+
+// Escapa texto livre antes de inseri-lo no HTML dos e-mails
+function escHtml_(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Colunas: ID | Email | Nome | Motivo | Observações | Status | Criado Em | Respondido Por | Respondido Em | Observação DP
+function getSolicitacoesSheet_() {
+  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
+  let sheet = ss.getSheetByName('SOLICITACOES');
+  if (!sheet) {
+    sheet = ss.insertSheet('SOLICITACOES');
+    sheet.appendRow(['ID', 'Email', 'Nome', 'Motivo', 'Observações', 'Status',
+                     'Criado Em', 'Respondido Por', 'Respondido Em', 'Observação DP']);
+  }
+  return sheet;
+}
+
+function solicitacaoFromRow_(r) {
+  return {
+    id: String(r[0]),
+    email: String(r[1]).trim(),
+    nome: String(r[2]).trim(),
+    motivo: String(r[3]).trim(),
+    obs: String(r[4]).trim(),
+    status: String(r[5]).trim(),          // pendente | aprovada | reprovada
+    criadoEm: r[6],
+    respondidoPor: String(r[7] || '').trim(),
+    respondidoEm: r[8] || '',
+    obsDP: String(r[9] || '').trim()
+  };
+}
+
+// Dados que o painel do diretor precisa: motivos disponíveis + solicitação pendente dele (se houver)
+function getSolicitacaoInfo(token) {
+  const user = getSessionUser_(token);
+  if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+
+  const rows      = getSolicitacoesSheet_().getDataRange().getValues();
+  const emailNorm = norm_(user.email);
+  let pendente    = null;
+
+  for (let i = rows.length - 1; i >= 1; i--) {
+    const r = rows[i];
+    if (norm_(r[1]) === emailNorm && norm_(r[5]) === 'pendente') { pendente = solicitacaoFromRow_(r); break; }
+  }
+
+  return { motivos: MOTIVOS_LIBERACAO, pendente: pendente, liberado: hasActiveLiberacao_(user.email) };
+}
+
+// Diretor registra o pedido; o DP é avisado por e-mail
+function criarSolicitacaoLiberacao(token, motivo, obs) {
+  const user = getSessionUser_(token);
+  if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+
+  motivo = String(motivo || '').trim();
+  obs    = String(obs || '').trim();
+  if (MOTIVOS_LIBERACAO.indexOf(motivo) === -1) throw new Error('Selecione um motivo válido.');
+
+  const info = getSolicitacaoInfo(token);
+  if (info.pendente) throw new Error('Você já tem uma solicitação pendente aguardando resposta do DP.');
+  if (info.liberado) throw new Error('Você já está com a edição liberada hoje.');
+
+  const id = Utilities.getUuid();
+  getSolicitacoesSheet_().appendRow([id, user.email, user.nome, motivo, obs, 'pendente',
+                                     new Date(), '', '', '']);
+  enviarEmailSolicitacaoDP_(user, motivo, obs);
+  return getSolicitacaoInfo(token);
+}
+
+// Lista todas as solicitações (mais recentes primeiro) — só admins/DP
+function getSolicitacoes(token) {
+  requireAdmin_(token);
+  const rows = getSolicitacoesSheet_().getDataRange().getValues();
+  const list = [];
+  for (let i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    list.push(solicitacaoFromRow_(rows[i]));
+  }
+  list.sort(function(a, b) {
+    const pa = a.status === 'pendente' ? 0 : 1;
+    const pb = b.status === 'pendente' ? 0 : 1;
+    return (pa - pb) || (new Date(b.criadoEm) - new Date(a.criadoEm));
+  });
+  return list;
+}
+
+// DP aprova ou reprova; aprovar cria a liberação (até 23:59 de hoje) e avisa o diretor por e-mail
+function responderSolicitacao(token, id, aprovar, obsDP) {
+  const admin = requireAdmin_(token);
+  obsDP = String(obsDP || '').trim();
+
+  const sheet = getSolicitacoesSheet_();
+  const rows  = sheet.getDataRange().getValues();
+  let rowIdx  = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(id)) { rowIdx = i; break; }
+  }
+  if (rowIdx === -1) throw new Error('Solicitação não encontrada.');
+
+  const solic = solicitacaoFromRow_(rows[rowIdx]);
+  if (solic.status !== 'pendente') throw new Error('Esta solicitação já foi respondida.');
+
+  const now    = new Date();
+  const status = aprovar ? 'aprovada' : 'reprovada';
+  sheet.getRange(rowIdx + 1, 6).setValue(status);                                    // Status
+  sheet.getRange(rowIdx + 1, 8, 1, 3).setValues([[admin.email, now, obsDP]]);       // Respondido Por | Respondido Em | Observação DP
+
+  let expira = null;
+  if (aprovar) {
+    expira = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    getLiberacoesSheet_().appendRow([solic.email, admin.email, now, expira]);
+  }
+
+  enviarEmailRespostaSolicitacao_(solic, aprovar, obsDP, expira);
+  return { solicitacoes: getSolicitacoes(token), liberacoes: getLiberacoes(token) };
+}
+
+// Aviso ao DP de que existe uma nova solicitação para analisar
+function enviarEmailSolicitacaoDP_(user, motivo, obs) {
+  try {
+    const assunto = 'Nova solicitação de liberação de edição — Vale Transporte';
+
+    const corpoTexto =
+      'Olá.\n\n' +
+      'Uma nova solicitação de liberação de edição do Vale Transporte foi registrada e aguarda sua análise.\n\n' +
+      'Solicitante: ' + (user.nome || user.email) + ' (' + user.email + ')\n' +
+      'Motivo: ' + motivo + '\n' +
+      (obs ? 'Observações: ' + obs + '\n' : '') +
+      '\nPara aprovar ou reprovar, acesse o Vale Transporte pelo Hub BRASAS BI e abra a aba "Liberação":\n' +
+      HUB_URL + '\n\n' +
+      'Equipe BRASAS BI';
+
+    const corpoHtml =
+      '<div style="background:#f1f5f9;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">' +
+        '<div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0">' +
+          '<div style="background:#0a1628;padding:26px 32px">' +
+            '<h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;line-height:1.3">' +
+              'Nova Solicitação de Liberação — Vale Transporte' +
+            '</h1>' +
+          '</div>' +
+          '<div style="padding:28px 32px">' +
+            '<p style="margin:0 0 22px;font-size:15px;color:#0f2035;line-height:1.6">' +
+              'Uma nova solicitação de liberação de edição foi registrada e <strong>aguarda sua análise</strong>.' +
+            '</p>' +
+            '<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:18px 20px;margin-bottom:24px">' +
+              '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:14px">Dados da solicitação</div>' +
+              '<table style="width:100%;border-collapse:collapse;font-size:14px">' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;width:130px;vertical-align:top">Solicitante:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + escHtml_(user.nome || user.email) + '<br><span style="font-weight:400;color:#64748b">' + escHtml_(user.email) + '</span></td>' +
+                '</tr>' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;vertical-align:top">Motivo:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + escHtml_(motivo) + '</td>' +
+                '</tr>' +
+                (obs ?
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;vertical-align:top">Observações:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035">' + escHtml_(obs) + '</td>' +
+                '</tr>' : '') +
+              '</table>' +
+            '</div>' +
+            '<div style="text-align:center;margin-bottom:8px">' +
+              '<a href="' + HUB_URL + '" style="display:inline-block;background:#0f2035;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px">' +
+                'Analisar solicitação' +
+              '</a>' +
+            '</div>' +
+            '<p style="margin:20px 0 0;font-size:12.5px;color:#94a3b8;text-align:center">' +
+              'Abra a aba "Liberação" do Vale Transporte para aprovar ou reprovar.' +
+            '</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    MailApp.sendEmail(DP_EMAIL, assunto, corpoTexto, { htmlBody: corpoHtml, name: 'Vale Transporte — BRASAS BI' });
+  } catch (e) {
+    Logger.log('enviarEmailSolicitacaoDP_: falha ao enviar e-mail — ' + e);
+  }
+}
+
+// Resposta ao diretor: aprovada (com validade até 23:59 de hoje) ou reprovada, com observação do DP
+function enviarEmailRespostaSolicitacao_(solic, aprovada, obsDP, expira) {
+  try {
+    const pad = function(n) { return n < 10 ? '0' + n : n; };
+    const fmtDT = function(d) {
+      return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() +
+        ' às ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    };
+    const nome = solic.nome || findNomeByEmail_(solic.email);
+
+    const assunto = aprovada
+      ? 'Solicitação de liberação APROVADA — Vale Transporte'
+      : 'Solicitação de liberação reprovada — Vale Transporte';
+
+    const corpoTexto =
+      'Olá' + (nome ? ', ' + nome.toUpperCase() : '') + '.\n\n' +
+      (aprovada
+        ? 'Sua solicitação de liberação de edição do Vale Transporte foi APROVADA pelo Departamento Pessoal.\n\n' +
+          'ATENÇÃO: a liberação vale SOMENTE HOJE, até as 23:59 (' + fmtDT(expira) + '). Amanhã a edição já estará bloqueada novamente.\n\n'
+        : 'Sua solicitação de liberação de edição do Vale Transporte foi REPROVADA pelo Departamento Pessoal.\n\n') +
+      'Motivo informado por você: ' + solic.motivo + '\n' +
+      (obsDP ? 'Observação do DP: ' + obsDP + '\n' : '') +
+      (aprovada ? '\nAcesse pelo Hub BRASAS BI: ' + HUB_URL + '\n' : '') +
+      '\nEm caso de dúvidas, entre em contato com o Departamento Pessoal (dp@brasas.com).\n\n' +
+      'Equipe BRASAS BI';
+
+    const corBarra  = aprovada ? '#15803d' : '#dc2626';
+    const titulo    = aprovada ? 'Solicitação Aprovada — Vale Transporte' : 'Solicitação Reprovada — Vale Transporte';
+
+    const corpoHtml =
+      '<div style="background:#f1f5f9;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">' +
+        '<div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0">' +
+          '<div style="background:' + corBarra + ';padding:26px 32px">' +
+            '<h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;line-height:1.3">' + titulo + '</h1>' +
+          '</div>' +
+          '<div style="padding:28px 32px">' +
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:13px;color:#475569">' +
+              '&#9888;&#65039; Este é um comunicado automático. <strong>Não responda este e-mail</strong> — em caso de dúvidas, entre em contato com o Departamento Pessoal pelo endereço <a href="mailto:dp@brasas.com" style="color:#2a4d76">dp@brasas.com</a>.' +
+            '</div>' +
+            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035">Olá' +
+              (nome ? ', <strong>' + escHtml_(nome.toUpperCase()) + '</strong>' : '') + '.</p>' +
+            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035;line-height:1.6">' +
+              (aprovada
+                ? 'Sua solicitação de liberação de edição do <strong>Vale Transporte</strong> foi <strong style="color:#15803d">APROVADA</strong> pelo Departamento Pessoal.'
+                : 'Sua solicitação de liberação de edição do <strong>Vale Transporte</strong> foi <strong style="color:#dc2626">REPROVADA</strong> pelo Departamento Pessoal.') +
+            '</p>' +
+            (aprovada ?
+            '<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:14px;color:#92400e;line-height:1.5">' +
+              '&#9200; A liberação vale <strong>somente hoje, até as 23:59</strong>. Amanhã a edição já estará bloqueada novamente.' +
+            '</div>' : '') +
+            '<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:18px 20px;margin-bottom:24px">' +
+              '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:14px">Resumo</div>' +
+              '<table style="width:100%;border-collapse:collapse;font-size:14px">' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;width:160px;vertical-align:top">Motivo informado:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + escHtml_(solic.motivo) + '</td>' +
+                '</tr>' +
+                (solic.obs ?
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;vertical-align:top">Suas observações:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035">' + escHtml_(solic.obs) + '</td>' +
+                '</tr>' : '') +
+                (obsDP ?
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;vertical-align:top">Observação do DP:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035">' + escHtml_(obsDP) + '</td>' +
+                '</tr>' : '') +
+                (aprovada ?
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b">Válida até:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + fmtDT(expira) + ' (hoje)</td>' +
+                '</tr>' : '') +
+              '</table>' +
+            '</div>' +
+            (aprovada ?
+            '<div style="text-align:center;margin-bottom:8px">' +
+              '<a href="' + HUB_URL + '" style="display:inline-block;background:#0f2035;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px">' +
+                'Acessar o Vale Transporte' +
+              '</a>' +
+            '</div>' +
+            '<p style="margin:20px 0 0;font-size:12.5px;color:#94a3b8;text-align:center">' +
+              'Após as 23:59 de hoje, a edição volta a ficar bloqueada automaticamente.' +
+            '</p>' : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    MailApp.sendEmail(solic.email, assunto, corpoTexto, { htmlBody: corpoHtml, name: 'Vale Transporte — BRASAS BI' });
+  } catch (e) {
+    Logger.log('enviarEmailRespostaSolicitacao_: falha ao enviar e-mail para ' + solic.email + ' — ' + e);
   }
 }
 

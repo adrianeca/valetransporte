@@ -344,6 +344,61 @@ input[type=number]:disabled {
 .status-pill {padding:4px 12px;border-radius:20px;font-size:.72rem;font-weight:700;display:inline-block}
 .status-pill.ativa    {background:var(--success-100);color:var(--success-600)}
 .status-pill.expirada {background:var(--gray-100);color:var(--gray-400)}
+.status-pill.pendente  {background:#fef3c7;color:#b45309}
+.status-pill.aprovada  {background:var(--success-100);color:var(--success-600)}
+.status-pill.reprovada {background:var(--danger-100);color:var(--danger-600)}
+
+/* ── SOLICITAÇÕES DE LIBERAÇÃO (modais) ─────────────────────── */
+.modal-backdrop {
+  position:fixed;inset:0;z-index:5000;background:rgba(10,22,40,.45);
+  display:none;align-items:center;justify-content:center;padding:16px;
+}
+.modal-backdrop.open {display:flex}
+.modal-card {
+  background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow-md);
+  width:100%;max-width:500px;padding:26px;max-height:90vh;overflow-y:auto;
+}
+.modal-title {font-size:1.05rem;font-weight:700;color:var(--navy-800)}
+.modal-sub   {font-size:.84rem;color:var(--gray-500);margin-top:2px}
+.modal-label {
+  display:block;font-size:.72rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--gray-400);margin:16px 0 6px;
+}
+.modal-select, .modal-textarea {
+  width:100%;padding:10px 14px;border:1.5px solid var(--gray-200);border-radius:8px;
+  font-family:var(--font);font-size:.88rem;color:var(--navy-800);outline:none;background:var(--white);
+  transition:border-color .15s,box-shadow .15s;
+}
+.modal-textarea {resize:vertical;min-height:84px}
+.modal-select:focus, .modal-textarea:focus {border-color:var(--navy-500);box-shadow:0 0 0 3px rgba(42,77,118,.12)}
+.modal-actions {display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+.btn-ghost {
+  background:none;border:1.5px solid var(--gray-200);border-radius:8px;
+  padding:10px 18px;font-family:var(--font);font-size:.86rem;font-weight:600;
+  color:var(--gray-500);cursor:pointer;transition:border-color .15s,color .15s;
+}
+.btn-ghost:hover {border-color:var(--gray-300);color:var(--navy-800)}
+.save-btn.btn-danger {background:var(--danger-600)}
+.save-btn.btn-danger:hover {background:var(--danger-500)}
+.modal-status {font-size:.82rem;font-weight:600;margin-top:12px}
+.modal-status.error {color:var(--danger-600)}
+.solic-pend-box {
+  background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;
+  padding:14px 16px;font-size:.86rem;color:#92400e;line-height:1.5;margin-top:16px;
+}
+.solic-summary {
+  background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;
+  padding:14px 16px;font-size:.85rem;color:var(--navy-800);margin-top:16px;line-height:1.6;
+}
+.solic-summary .lbl {color:var(--gray-500)}
+.solic-action-btn {
+  border:none;border-radius:7px;padding:6px 13px;font-family:var(--font);
+  font-size:.76rem;font-weight:700;cursor:pointer;transition:filter .15s;
+}
+.solic-action-btn:hover {filter:brightness(1.08)}
+.solic-action-btn.aprovar  {background:var(--success-100);color:var(--success-600)}
+.solic-action-btn.reprovar {background:var(--danger-100);color:var(--danger-600)}
+.solic-obs-cell {max-width:220px;white-space:normal;font-size:.78rem;color:var(--gray-600)}
 
 @media(max-width:900px){
   .app-header{padding:12px 16px}
@@ -540,11 +595,20 @@ input[type=number]:disabled {
       <!-- ── Administração (só admin) ── -->
       <div id="tabAdmPage" class="tab-panel">
         <div class="hist-section">
+
+          <div class="liber-card-title" style="margin-bottom:10px">Solicitações de Liberação</div>
+          <table class="hist-table" style="margin-bottom:32px">
+            <thead>
+              <tr><th>Solicitante</th><th>Motivo</th><th>Observações</th><th>Solicitada em</th><th>Status</th><th>Resposta</th></tr>
+            </thead>
+            <tbody id="solicitacoesBody"></tbody>
+          </table>
+
           <div class="liber-card">
-            <div class="liber-card-title">Nova Liberação (24h)</div>
+            <div class="liber-card-title">Nova Liberação (válida até 23:59 de hoje)</div>
             <div class="liber-form">
               <input type="email" id="liberEmailInput" class="liber-input" placeholder="e-mail do usuário" onkeydown="if(event.key==='Enter') criarLiberacao()">
-              <button class="save-btn" onclick="criarLiberacao()">Liberar 24h</button>
+              <button class="save-btn" onclick="criarLiberacao()">Liberar hoje</button>
             </div>
             <div id="liberStatus" class="liber-status"></div>
           </div>
@@ -567,10 +631,63 @@ input[type=number]:disabled {
     <div id="lockNotice" class="lock-notice" style="display:none">
       Prazo encerrado — formulário somente para visualização
     </div>
+    <button id="solicitarBtn" class="save-btn" onclick="abrirSolicitacao()" style="display:none">
+      Solicitar liberação
+    </button>
     <button id="saveBtn" class="save-btn" onclick="saveData()" style="display:none">
       Salvar dados
     </button>
   </footer>
+
+  <!-- ── Modal: diretor solicita liberação ── -->
+  <div id="solicModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-title">Solicitar Liberação de Edição</div>
+      <div class="modal-sub">O Departamento Pessoal será avisado por e-mail e você receberá a resposta (aprovação ou reprovação) também por e-mail.</div>
+
+      <div id="solicLoading" style="text-align:center;color:var(--gray-400);padding:24px 0;font-size:.86rem">Carregando...</div>
+
+      <div id="solicPend" class="solic-pend-box" style="display:none">
+        &#9203; Você já tem uma solicitação <strong>pendente</strong> aguardando resposta do DP.<br>
+        <span id="solicPendDetalhe" style="font-size:.8rem"></span>
+      </div>
+
+      <div id="solicForm" style="display:none">
+        <label class="modal-label" for="solicMotivo">Motivo</label>
+        <select id="solicMotivo" class="modal-select"></select>
+
+        <label class="modal-label" for="solicObs">Observações (opcional)</label>
+        <textarea id="solicObs" class="modal-textarea" placeholder="Detalhe aqui o que precisa ser lançado ou corrigido"></textarea>
+
+        <div id="solicStatus" class="modal-status"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="fecharModal('solicModal')">Fechar</button>
+        <button id="solicEnviarBtn" class="save-btn" style="display:none" onclick="enviarSolicitacao()">Enviar solicitação</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Modal: DP responde a solicitação ── -->
+  <div id="respModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-title" id="respTitle">Responder Solicitação</div>
+      <div class="modal-sub">O solicitante receberá a resposta por e-mail, incluindo sua observação.</div>
+
+      <div class="solic-summary" id="respResumo"></div>
+
+      <label class="modal-label" for="respObs">Observação do DP (opcional — vai no e-mail de resposta)</label>
+      <textarea id="respObs" class="modal-textarea" placeholder="Ex: liberado apenas para corrigir o lançamento de fulano"></textarea>
+
+      <div id="respStatus" class="modal-status"></div>
+
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="fecharModal('respModal')">Cancelar</button>
+        <button id="respConfirmBtn" class="save-btn" onclick="confirmarResposta()">Confirmar</button>
+      </div>
+    </div>
+  </div>
 
 </div><!-- /screenMain -->
 
@@ -681,6 +798,7 @@ function renderUI() {
     badge.textContent = 'Bloqueado';
     badge.className   = 'status-badge badge-locked';
     document.getElementById('lockNotice').style.display = '';
+    document.getElementById('solicitarBtn').style.display = '';
   } else {
     badge.textContent = 'Aberto';
     badge.className   = 'status-badge badge-open';
@@ -1313,10 +1431,16 @@ function switchTab(tab) {
 function loadLiberacoes() {
   document.getElementById('liberacoesBody').innerHTML =
     '<tr><td colspan="4" style="text-align:center;color:var(--gray-400)">Carregando...</td></tr>';
+  document.getElementById('solicitacoesBody').innerHTML =
+    '<tr><td colspan="6" style="text-align:center;color:var(--gray-400)">Carregando...</td></tr>';
   google.script.run
     .withSuccessHandler(renderLiberacoes)
     .withFailureHandler(showError)
     .getLiberacoes(TOKEN);
+  google.script.run
+    .withSuccessHandler(renderSolicitacoes)
+    .withFailureHandler(showError)
+    .getSolicitacoes(TOKEN);
 }
 
 function renderLiberacoes(list) {
@@ -1357,7 +1481,7 @@ function criarLiberacao() {
   google.script.run
     .withSuccessHandler(function(list) {
       input.value = '';
-      status.textContent = 'Liberação de 24h concedida com sucesso!';
+      status.textContent = 'Liberação concedida com sucesso — válida até 23:59 de hoje!';
       status.className   = 'liber-status success';
       renderLiberacoes(list);
     })
@@ -1366,6 +1490,170 @@ function criarLiberacao() {
       status.className   = 'liber-status error';
     })
     .criarLiberacao(TOKEN, email);
+}
+
+// ── SOLICITAÇÕES DE LIBERAÇÃO ───────────────────────────────
+
+var solicState = { lista: [], respondendo: null };
+
+function fecharModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+// -- lado do diretor --------------------------------------------------------
+
+function abrirSolicitacao() {
+  document.getElementById('solicModal').classList.add('open');
+  document.getElementById('solicLoading').style.display   = '';
+  document.getElementById('solicPend').style.display      = 'none';
+  document.getElementById('solicForm').style.display      = 'none';
+  document.getElementById('solicEnviarBtn').style.display = 'none';
+  document.getElementById('solicStatus').textContent      = '';
+  google.script.run
+    .withSuccessHandler(onSolicInfo)
+    .withFailureHandler(function(err) {
+      document.getElementById('solicLoading').textContent = 'Erro: ' + (err.message || err);
+    })
+    .getSolicitacaoInfo(TOKEN);
+}
+
+function onSolicInfo(info) {
+  document.getElementById('solicLoading').style.display = 'none';
+
+  if (info.pendente) {
+    var p = info.pendente;
+    document.getElementById('solicPend').style.display = '';
+    document.getElementById('solicPendDetalhe').innerHTML =
+      'Motivo: ' + esc(p.motivo) + ' &middot; Enviada em ' + fmtDateTime(p.criadoEm);
+    return;
+  }
+
+  var sel = document.getElementById('solicMotivo');
+  sel.innerHTML = '<option value="">— selecione o motivo —</option>' +
+    info.motivos.map(function(m) { return '<option value="' + esc(m) + '">' + esc(m) + '</option>'; }).join('');
+  document.getElementById('solicObs').value = '';
+  document.getElementById('solicForm').style.display      = '';
+  document.getElementById('solicEnviarBtn').style.display = '';
+}
+
+function enviarSolicitacao() {
+  var motivo = document.getElementById('solicMotivo').value;
+  var obs    = document.getElementById('solicObs').value.trim();
+  var status = document.getElementById('solicStatus');
+  var btn    = document.getElementById('solicEnviarBtn');
+
+  if (!motivo) {
+    status.textContent = 'Selecione um motivo.';
+    status.className   = 'modal-status error';
+    return;
+  }
+
+  status.textContent = 'Enviando...';
+  status.className   = 'modal-status';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function(info) {
+      btn.disabled = false;
+      document.getElementById('solicForm').style.display = 'none';
+      btn.style.display = 'none';
+      onSolicInfo(info); // mostra o estado "pendente" recém-criado
+      setStatus('Solicitação enviada — o DP foi avisado por e-mail.', 'success');
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      status.textContent = 'Erro: ' + (err.message || err);
+      status.className   = 'modal-status error';
+    })
+    .criarSolicitacaoLiberacao(TOKEN, motivo, obs);
+}
+
+// -- lado do DP --------------------------------------------------------------
+
+function renderSolicitacoes(list) {
+  solicState.lista = list || [];
+  var body = document.getElementById('solicitacoesBody');
+  if (!solicState.lista.length) {
+    body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400)">Nenhuma solicitação recebida ainda</td></tr>';
+    return;
+  }
+  body.innerHTML = solicState.lista.map(function(s) {
+    var resposta;
+    if (s.status === 'pendente') {
+      resposta =
+        '<button class="solic-action-btn aprovar" onclick="abrirResposta(\'' + esc(s.id) + '\', true)">Aprovar</button> ' +
+        '<button class="solic-action-btn reprovar" onclick="abrirResposta(\'' + esc(s.id) + '\', false)">Reprovar</button>';
+    } else {
+      resposta = '<div class="solic-obs-cell" style="margin:0 auto">' +
+        (s.respondidoEm ? fmtDateTime(s.respondidoEm) : '') +
+        (s.obsDP ? '<br>&ldquo;' + esc(s.obsDP) + '&rdquo;' : '') + '</div>';
+    }
+    return '<tr>' +
+      '<td style="text-align:left">' + esc(s.nome || s.email) +
+        '<br><span style="font-size:.74rem;color:var(--gray-400)">' + esc(s.email) + '</span></td>' +
+      '<td style="text-align:left">' + esc(s.motivo) + '</td>' +
+      '<td class="solic-obs-cell" style="text-align:left">' + (s.obs ? esc(s.obs) : '<span style="color:var(--gray-300)">—</span>') + '</td>' +
+      '<td>' + fmtDateTime(s.criadoEm) + '</td>' +
+      '<td style="text-align:center"><span class="status-pill ' + esc(s.status) + '">' +
+        s.status.charAt(0).toUpperCase() + s.status.slice(1) + '</span></td>' +
+      '<td>' + resposta + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function abrirResposta(id, aprovar) {
+  var s = null;
+  for (var i = 0; i < solicState.lista.length; i++) {
+    if (solicState.lista[i].id === id) { s = solicState.lista[i]; break; }
+  }
+  if (!s) return;
+
+  solicState.respondendo = { id: id, aprovar: aprovar };
+
+  document.getElementById('respTitle').textContent = aprovar ? 'Aprovar Solicitação' : 'Reprovar Solicitação';
+  document.getElementById('respResumo').innerHTML =
+    '<span class="lbl">Solicitante:</span> <strong>' + esc(s.nome || s.email) + '</strong><br>' +
+    '<span class="lbl">Motivo:</span> ' + esc(s.motivo) +
+    (s.obs ? '<br><span class="lbl">Observações:</span> ' + esc(s.obs) : '') +
+    (aprovar ? '<br><span class="lbl">Efeito:</span> edição liberada <strong>até 23:59 de hoje</strong>' : '');
+  document.getElementById('respObs').value = '';
+  document.getElementById('respStatus').textContent = '';
+
+  var btn = document.getElementById('respConfirmBtn');
+  btn.textContent = aprovar ? 'Aprovar e liberar' : 'Reprovar';
+  btn.className   = aprovar ? 'save-btn' : 'save-btn btn-danger';
+  btn.disabled    = false;
+
+  document.getElementById('respModal').classList.add('open');
+}
+
+function confirmarResposta() {
+  var r = solicState.respondendo;
+  if (!r) return;
+
+  var obsDP  = document.getElementById('respObs').value.trim();
+  var status = document.getElementById('respStatus');
+  var btn    = document.getElementById('respConfirmBtn');
+
+  status.textContent = r.aprovar ? 'Aprovando...' : 'Reprovando...';
+  status.className   = 'modal-status';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      fecharModal('respModal');
+      renderSolicitacoes(res.solicitacoes);
+      renderLiberacoes(res.liberacoes);
+      setStatus(r.aprovar
+        ? 'Solicitação aprovada — liberação criada e solicitante avisado por e-mail.'
+        : 'Solicitação reprovada — solicitante avisado por e-mail.', 'success');
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      status.textContent = 'Erro: ' + (err.message || err);
+      status.className   = 'modal-status error';
+    })
+    .responderSolicitacao(TOKEN, r.id, r.aprovar, obsDP);
 }
 
 // ── SAVE ────────────────────────────────────────────────────
