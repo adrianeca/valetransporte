@@ -302,6 +302,15 @@ input[type=number]:disabled {
 .hist-table td:nth-child(6), .hist-table th:nth-child(6) {text-align:left}
 .hist-table tbody tr:hover {background:var(--gray-50)}
 
+/* Linha com valor alterado após o lançamento original (fundo âmbar suave + selo) */
+.hist-table tbody tr.row-edited td {background:#fffbeb}
+.hist-table tbody tr.row-edited:hover td {background:#fef3c7}
+.edited-badge {
+  display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;
+  font-size:.66rem;font-weight:700;color:#b45309;background:#fef3c7;
+  vertical-align:1px;cursor:default;white-space:nowrap;
+}
+
 .entry-table td {padding:6px 6px}
 .entry-table select.vt-tipo-sel {
   min-width:132px;max-width:170px;padding:5px 6px;
@@ -479,6 +488,16 @@ input[type=number]:disabled {
               <span class="multiselect-caret">&#9662;</span>
             </button>
             <div class="multiselect-panel" id="unitFilterPanel"></div>
+          </div>
+        </div>
+        <div id="respFilterWrap" style="display:none">
+          <label class="selector-label">Responsável</label>
+          <div class="multiselect" id="respFilterMulti">
+            <button type="button" class="emp-dropdown multiselect-btn" id="respFilterBtn" style="min-width:170px" onclick="toggleDropdown(event,'respFilterPanel')">
+              <span id="respFilterBtnLabel">Todas</span>
+              <span class="multiselect-caret">&#9662;</span>
+            </button>
+            <div class="multiselect-panel" id="respFilterPanel"></div>
           </div>
         </div>
         <div>
@@ -712,6 +731,7 @@ var state = {
   user: null, period: null, funcs: null, counter: 0,
   availableUnits: [],
   unitFilter: [],   // vazio = mostra todas as unidades permitidas
+  respFilter: [],   // vazio = mostra todas as responsáveis do DP
   yearFilter: [],   // vazio = mostra todos os anos
   monthFilter: [],  // vazio = mostra todos os meses (número 1-12)
   adminRows: [], docenteRows: []
@@ -722,6 +742,15 @@ var MESES = ['01 Janeiro','02 Fevereiro','03 Março','04 Abril','05 Maio','06 Ju
 
 function normStr(s) {
   return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// ── Responsáveis do DP por empresa: as listadas são da Jessica; todas as demais, da Priscila ──
+var RESPONSAVEIS = ['Jessica', 'Priscila'];
+var EMPRESAS_JESSICA = ['metodos', 'bod', 'gr', 'nt', 'vp', 'vo', 'nl', 'mr', 'tj', 'cg',
+                        'cx', 'dt', 'editora', 'ec new', 'rc'].map(normStr);
+
+function respDaUnidade(unidade) {
+  return EMPRESAS_JESSICA.indexOf(normStr(unidade)) !== -1 ? 'Jessica' : 'Priscila';
 }
 
 // ── INIT ────────────────────────────────────────────────────
@@ -821,13 +850,19 @@ function renderUI() {
 // ── FILTROS (unidade/ano/mês, todos multi-seleção) ─────────────────
 
 function renderFilterBar() {
-  var wrap = document.getElementById('unitFilterWrap');
+  var wrap     = document.getElementById('unitFilterWrap');
+  var respWrap = document.getElementById('respFilterWrap');
   if (state.availableUnits.length > 1) {
     wrap.style.display = '';
     renderMultiselectPanel('unitFilterPanel', state.availableUnits.map(function(un) { return { value: un, label: un }; }), state.unitFilter, 'onUnitFilterCheck');
     updateUnitFilterLabel();
+
+    respWrap.style.display = '';
+    renderMultiselectPanel('respFilterPanel', RESPONSAVEIS.map(function(nm) { return { value: nm, label: nm }; }), state.respFilter, 'onRespFilterCheck');
+    updateRespFilterLabel();
   } else {
     wrap.style.display = 'none';
+    respWrap.style.display = 'none';
   }
 
   var years = distinctYears();
@@ -898,9 +933,21 @@ function updateMonthFilterLabel() {
     n === 0 ? 'Todos os meses' : (n === 1 ? MESES[Number(state.monthFilter[0]) - 1] : n + ' meses selecionados');
 }
 
+function updateRespFilterLabel() {
+  var n = state.respFilter.length;
+  document.getElementById('respFilterBtnLabel').textContent =
+    n === 0 ? 'Todas' : state.respFilter.join(', ');
+}
+
 function onUnitFilterCheck() {
   state.unitFilter = multiselectValues('unitFilterPanel');
   updateUnitFilterLabel();
+  refreshFilteredViews();
+}
+
+function onRespFilterCheck() {
+  state.respFilter = multiselectValues('respFilterPanel');
+  updateRespFilterLabel();
   refreshFilteredViews();
 }
 
@@ -918,13 +965,22 @@ function onMonthFilterCheck() {
 
 function clearFilters() {
   state.unitFilter  = [];
+  state.respFilter  = [];
   state.yearFilter  = [];
   state.monthFilter = [];
   renderFilterBar();
   refreshFilteredViews();
 }
 
-function visibleUnits() { return state.unitFilter.length ? state.unitFilter : state.availableUnits; }
+// Unidades visíveis = filtro de unidades ∩ filtro de responsável (o filtro de responsável
+// também vale para contagens, "+ Adicionar", copiar mês anterior e salvamento)
+function visibleUnits() {
+  var base = state.unitFilter.length ? state.unitFilter : state.availableUnits;
+  if (state.respFilter.length) {
+    base = base.filter(function(u) { return state.respFilter.indexOf(respDaUnidade(u)) !== -1; });
+  }
+  return base;
+}
 
 function passesFilter(r) {
   var units = visibleUnits().map(normStr);
@@ -1077,16 +1133,27 @@ function fmtRegistros(n) { return n + (n === 1 ? ' registro' : ' registros'); }
 
 function isSamePeriod(r, target) { return r.mes === target.mes && r.ano === target.ano; }
 
+// Atributos do <tr> e selo ao lado do nome para linhas editadas após o lançamento original
+function editedRowAttr(r) {
+  if (!r.editadoEm) return '';
+  return ' class="row-edited" title="Editado por ' + esc(r.editadoPor) + ' em ' + esc(r.editadoEm) + '"';
+}
+
+function editedBadge(r) {
+  if (!r.editadoEm) return '';
+  return ' <span class="edited-badge" title="Editado por ' + esc(r.editadoPor) + ' em ' + esc(r.editadoEm) + '">&#9998; editado</span>';
+}
+
 function renderRows(rows, p, type) {
   return rows.map(function(r, i) {
     var open = !p.locked && isSamePeriod(r, p.previsto);
     var delCell = open
       ? '<td><button type="button" class="row-del-btn" title="Excluir lançamento" onclick="deleteRow(\'' + type + '\',' + i + ')">🗑</button></td>'
       : '<td></td>';
-    return '<tr>' +
+    return '<tr' + editedRowAttr(r) + '>' +
       '<td>' + esc(r.unidade) + '</td>' +
       '<td>' + esc(MESES[r.mes - 1]) + '</td><td>' + r.ano + '</td>' +
-      '<td>' + esc(r.matricula) + '</td><td>' + esc(r.cpf) + '</td><td>' + esc(r.nome) + '</td>' +
+      '<td>' + esc(r.matricula) + '</td><td>' + esc(r.cpf) + '</td><td>' + esc(r.nome) + editedBadge(r) + '</td>' +
       tipoCell(type, i, 'ida', r, open) +
       valorCell('ida', r, open) +
       '<td>' + numInputHtml('vt-qtd-ida', 'vt-qtd', r.qtdIda, open, '1') + '</td>' +

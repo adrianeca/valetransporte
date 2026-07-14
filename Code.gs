@@ -46,8 +46,8 @@ const TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']; // normalizado
 // As colunas do 2º trecho (R-U) e do 3º trecho (V-Y) ficam no FINAL para não deslocar
 // as colunas das linhas já salvas; os trechos extras usam a mesma Qtd do 1º (quantidade é por sentido).
 const VT_HEADERS = {
-  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3'],
-  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3']
+  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por'],
+  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por']
 };
 
 // Normaliza texto para comparação: minúsculo, sem acento, sem espaços nas bordas
@@ -68,6 +68,13 @@ const MESES_LABEL = ['01 Janeiro', '02 Fevereiro', '03 Março', '04 Abril', '05 
 function mesLabel_(m) {
   const n = parseMes_(m);
   return MESES_LABEL[n - 1] || String(m);
+}
+
+// Formata data+hora para exibição (colunas "Editado Em")
+function fmtDataHora_(v) {
+  if (!v) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+  return String(v);
 }
 
 // Coluna ATIVO (K) guarda o texto "Ativo"/"Inativo" (às vezes true/false, sim/não)
@@ -833,7 +840,8 @@ function getVTData(token) {
         tipoIda2: String(r[17] || '').trim(), valorIda2: r[18] || 0,
         tipoVolta2: String(r[19] || '').trim(), valorVolta2: r[20] || 0,
         tipoIda3: String(r[21] || '').trim(), valorIda3: r[22] || 0,
-        tipoVolta3: String(r[23] || '').trim(), valorVolta3: r[24] || 0
+        tipoVolta3: String(r[23] || '').trim(), valorVolta3: r[24] || 0,
+        editadoEm: fmtDataHora_(r[25]), editadoPor: String(r[26] || '').trim()
       });
     }
 
@@ -881,15 +889,28 @@ function saveVTData(payload) {
     ];
   }
 
-  _upsertRows_(adminSheet, adminEntries, valuesFn);
-  _upsertRows_(docenteSheet, docenteEntries, valuesFn);
+  _upsertRows_(adminSheet, adminEntries, valuesFn, user.email);
+  _upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email);
 
   return { success: true };
 }
 
+// Um valor "já lançado" (número ≠ 0 ou texto não vazio) mudou? Preencher um campo
+// vazio/zerado conta como lançamento normal, não como edição.
+function _valMudou_(antigo, novo) {
+  if (typeof novo === 'number') {
+    const a = Number(antigo) || 0;
+    return a !== 0 && Math.abs(a - novo) > 0.005; // tolerância para ruído de ponto flutuante
+  }
+  const a = String(antigo === null || antigo === undefined ? '' : antigo).trim();
+  return a !== '' && a !== String(novo === null || novo === undefined ? '' : novo).trim();
+}
+
 // Atualiza a linha existente (unidade+mes+ano+matricula) ou cria uma nova, para cada item.
 // Identidade (Unidade..CPF..Nome) ocupa as colunas A-F; os valores calculados começam na G.
-function _upsertRows_(sheet, entries, valuesFn) {
+// Quando um valor já lançado é alterado, grava quem editou e quando nas duas colunas
+// após os valores (Z/AA — cabeçalhos garantidos por getOrCreateVTSheet_/VT_HEADERS).
+function _upsertRows_(sheet, entries, valuesFn, editorEmail) {
   if (!entries || !entries.length) return;
 
   const allRows = sheet.getDataRange().getValues();
@@ -904,7 +925,17 @@ function _upsertRows_(sheet, entries, valuesFn) {
     const key    = norm_(e.unidade) + '|' + Number(e.mes) + '|' + Number(e.ano) + '|' + mat;
     const values = valuesFn(e);
     if (map[key]) {
-      sheet.getRange(map[key], 7, 1, values.length).setValues([values]);
+      const rowIdx = map[key];
+      // Compara com o que estava na planilha ANTES deste salvamento (linhas recém-criadas
+      // neste mesmo save não entram na comparação)
+      if (rowIdx <= allRows.length) {
+        const oldVals = allRows[rowIdx - 1].slice(6, 6 + values.length);
+        const editou  = values.some(function(v, j) { return _valMudou_(oldVals[j], v); });
+        if (editou) {
+          sheet.getRange(rowIdx, 7 + values.length, 1, 2).setValues([[new Date(), editorEmail || '']]);
+        }
+      }
+      sheet.getRange(rowIdx, 7, 1, values.length).setValues([values]);
     } else {
       sheet.appendRow([e.unidade, mesLabel_(e.mes), e.ano, mat, e.cpf || '', e.nome].concat(values));
       map[key] = sheet.getLastRow();
