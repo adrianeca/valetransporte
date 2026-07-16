@@ -46,8 +46,8 @@ const TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']; // normalizado
 // As colunas do 2º trecho (R-U) e do 3º trecho (V-Y) ficam no FINAL para não deslocar
 // as colunas das linhas já salvas; os trechos extras usam a mesma Qtd do 1º (quantidade é por sentido).
 const VT_HEADERS = {
-  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por'],
-  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por']
+  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por'],
+  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por']
 };
 
 // Normaliza texto para comparação: minúsculo, sem acento, sem espaços nas bordas
@@ -852,7 +852,9 @@ function getVTData(token) {
         tipoVolta2: String(r[19] || '').trim(), valorVolta2: r[20] || 0,
         tipoIda3: String(r[21] || '').trim(), valorIda3: r[22] || 0,
         tipoVolta3: String(r[23] || '').trim(), valorVolta3: r[24] || 0,
-        editadoEm: fmtDataHora_(r[25]), editadoPor: String(r[26] || '').trim()
+        editadoEm: fmtDataHora_(r[25]), editadoPor: String(r[26] || '').trim(),
+        comentario: String(r[27] || '').trim(),
+        comentadoEm: fmtDataHora_(r[28]), comentadoPor: String(r[29] || '').trim()
       });
     }
 
@@ -909,6 +911,45 @@ function saveVTData(payload) {
   _upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email);
 
   return { success: true };
+}
+
+// =============================================================================
+// COMENTÁRIOS — uma anotação por lançamento (unidade+mês+ano+matrícula), visível
+// tanto pro diretor quanto pro DP (ambos usam a mesma tela). Não é um campo de VT:
+// pode ser preenchido mesmo com o período bloqueado, e não altera Total/cálculos.
+// =============================================================================
+
+function salvarComentarioVT(payload) {
+  const user = getSessionUser_(payload.token);
+  if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+
+  const unidade = canonUnidade_(payload.unidade);
+  if (!isUserAllowedUnit_(user, unidade)) throw new Error('Você não tem permissão para esta unidade.');
+
+  const sheetName = payload.categoria === 'docente' ? 'DOCENTE' : 'ADMINISTRATIVO';
+  const mat        = String(payload.matricula || '').trim();
+  const mes        = Number(payload.mes), ano = Number(payload.ano);
+  const comentario = String(payload.comentario || '').trim();
+  const key = norm_(unidade) + '|' + mes + '|' + ano + '|' + mat;
+
+  const ss      = SpreadsheetApp.openById(VT_SHEET_ID);
+  const sheet   = getOrCreateVTSheet_(ss, sheetName);
+  const allRows = sheet.getDataRange().getValues();
+
+  let rowIdx = 0;
+  for (let i = 1; i < allRows.length; i++) {
+    const r = allRows[i];
+    const k = norm_(canonUnidade_(r[0])) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim();
+    if (k === key) { rowIdx = i + 1; break; }
+  }
+  if (!rowIdx) throw new Error('Lançamento não encontrado — salve os dados antes de comentar.');
+
+  const comCol1 = VT_HEADERS[sheetName].indexOf('Comentário') + 1; // 1-based
+  const agora = comentario ? new Date() : '';
+  const autor = comentario ? (user.email || '') : '';
+  sheet.getRange(rowIdx, comCol1, 1, 3).setValues([[comentario, agora, autor]]);
+
+  return { success: true, comentario: comentario, comentadoEm: fmtDataHora_(agora), comentadoPor: autor };
 }
 
 // Um valor "já lançado" (número ≠ 0 ou texto não vazio) mudou? Preencher um campo

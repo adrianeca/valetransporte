@@ -19,13 +19,22 @@ Repositório: `adrianeca/valetransporte`. Irmão do webapp de VR (`adrianeca/val
 
 ## Modelo de dados
 
-Colunas ADMINISTRATIVO/DOCENTE: `Unidade|Mês|Ano|Matrícula|CPF|Nome|TipoIda|ValorIda|QtdIda|TipoVolta|ValorVolta|QtdVolta|Total|DiasTrabalhados|ValorDiário|ValorJaé|ValorRioCard|TipoIda2|ValorIda2|TipoVolta2|ValorVolta2|TipoIda3|ValorIda3|TipoVolta3|ValorVolta3|EditadoEm|EditadoPor`
+Colunas ADMINISTRATIVO/DOCENTE: `Unidade|Mês|Ano|Matrícula|CPF|Nome|TipoIda|ValorIda|QtdIda|TipoVolta|ValorVolta|QtdVolta|Total|DiasTrabalhados|ValorDiário|ValorJaé|ValorRioCard|TipoIda2|ValorIda2|TipoVolta2|ValorVolta2|TipoIda3|ValorIda3|TipoVolta3|ValorVolta3|EditadoEm|EditadoPor|Comentário|ComentadoEm|ComentadoPor`
 
 - Até 3 "trechos" por sentido (ida/volta) — ex.: ônibus + metrô no mesmo trajeto. Trechos extras (2º/3º) usam a MESMA Qtd do 1º trecho daquele sentido.
 - Campos calculados (Total, Dias Trabalhados, Valor Diário, Valor Jaé, Valor RioCard) são **sempre recalculados no backend** em `calcularVT_()` ao salvar — nunca confia no que o cliente manda nem em fórmula de planilha.
 - Rateio Jaé/RioCard: `TIPOS_JAE = ['onibus municipal', 'metro']`, `TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']` (comparação normalizada, sem acento).
 - `UNIDADES_SEM_RATEIO = ['VO']` — unidade de São Paulo, sem cartão Jaé/RioCard; só o campo Total vale pra ela (`isSemRateio_()`).
 - Edição sinalizada: colunas `Editado Em`/`Editado Por` gravadas só quando um valor **já lançado** (≠ 0) muda — preencher campo zerado é lançamento normal, não edição. Linha marcada em âmbar na UI com selo "✎ editado".
+- As 3 colunas finais (`Comentário`/`Comentado Em`/`Comentado Por`) fazem parte de `VT_HEADERS` — `getOrCreateVTSheet_()` já garante esse cabeçalho automaticamente, inclusive em abas criadas antes dessa mudança (mesmo mecanismo que já estende o cabeçalho pros trechos extras).
+
+## Comentários por lançamento
+
+Cada linha das tabelas Administrativo/Docente tem um ícone de comentário (💬) que abre um modal para anotar uma observação livre sobre aquele lançamento — não é um campo de VT, não entra em `calcularVT_()` e não sai no CSV/Planilha Google exportados.
+
+- Um comentário por lançamento (sobrescreve o anterior ao salvar); apagar o texto e salvar limpa comentário + autor/data.
+- Visível tanto para o diretor quanto para o DP — mesma tela (`tabAdmin`/`tabDocente`).
+- Funciona mesmo com o período bloqueado. Só é possível comentar lançamento já salvo (`salvarComentarioVT` busca a linha por unidade+mês+ano+matrícula); linhas recém-adicionadas mostram o ícone desabilitado até serem salvas.
 
 ## Período e bloqueio
 

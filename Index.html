@@ -269,6 +269,16 @@ input[type=number]:disabled {
 }
 .row-del-btn:hover {background:var(--danger-100);color:var(--danger-600)}
 
+.comment-btn {
+  background:none;border:none;cursor:pointer;
+  color:var(--gray-300);font-size:.95rem;line-height:1;
+  padding:5px 7px;border-radius:6px;
+  transition:background .15s,color .15s;
+}
+.comment-btn:hover:not(:disabled) {background:var(--navy-50);color:var(--navy-600)}
+.comment-btn:disabled {cursor:not-allowed;opacity:.4}
+.comment-btn.has-comment {color:var(--warning-500)}
+
 /* Trechos extras de transporte (ida/volta): campos empilhados na mesma célula */
 .leg-stack {display:flex;flex-direction:column;gap:4px;align-items:stretch}
 .leg-row   {display:flex;align-items:center;gap:4px}
@@ -576,7 +586,7 @@ input[type=number]:disabled {
                 <th colspan="3">Ida</th><th colspan="3">Volta</th>
                 <th rowspan="2">Total</th><th rowspan="2">Dias Trab.</th><th rowspan="2">Valor Diário</th>
                 <th rowspan="2">Valor Jaé</th><th rowspan="2">Valor RioCard</th>
-                <th rowspan="2"></th>
+                <th rowspan="2"></th><th rowspan="2"></th>
               </tr>
               <tr><th>Tipo</th><th>Valor</th><th>Qtd</th><th>Tipo</th><th>Valor</th><th>Qtd</th></tr>
             </thead>
@@ -612,7 +622,7 @@ input[type=number]:disabled {
                 <th colspan="3">Ida</th><th colspan="3">Volta</th>
                 <th rowspan="2">Total</th><th rowspan="2">Dias Trab.</th><th rowspan="2">Valor Diário</th>
                 <th rowspan="2">Valor Jaé</th><th rowspan="2">Valor RioCard</th>
-                <th rowspan="2"></th>
+                <th rowspan="2"></th><th rowspan="2"></th>
               </tr>
               <tr><th>Tipo</th><th>Valor</th><th>Qtd</th><th>Tipo</th><th>Valor</th><th>Qtd</th></tr>
             </thead>
@@ -716,6 +726,25 @@ input[type=number]:disabled {
       <div class="modal-actions">
         <button class="btn-ghost" onclick="fecharModal('respModal')">Cancelar</button>
         <button id="respConfirmBtn" class="save-btn" onclick="confirmarResposta()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Modal: comentário de um lançamento (visível para diretor e DP) ── -->
+  <div id="comentarioModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-title">Comentário do lançamento</div>
+      <div class="modal-sub" id="comentarioSub"></div>
+
+      <label class="modal-label" for="comentarioTexto">Comentário (visível para o diretor e o DP)</label>
+      <textarea id="comentarioTexto" class="modal-textarea" placeholder="Escreva uma observação sobre este lançamento"></textarea>
+      <div class="modal-sub" id="comentarioMeta" style="margin-top:6px"></div>
+
+      <div id="comentarioStatus" class="modal-status"></div>
+
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="fecharModal('comentarioModal')">Fechar</button>
+        <button id="comentarioSalvarBtn" class="save-btn" onclick="salvarComentario()">Salvar comentário</button>
       </div>
     </div>
   </div>
@@ -1242,6 +1271,16 @@ function editedBadge(r) {
   return ' <span class="edited-badge" title="Editado por ' + esc(r.editadoPor) + ' em ' + esc(r.editadoEm) + '">&#9998; editado</span>';
 }
 
+function commentCell(r, type, i) {
+  if (r._new) {
+    return '<td><button type="button" class="comment-btn" disabled title="Salve o lançamento antes de comentar">&#128172;</button></td>';
+  }
+  var has   = !!(r.comentario && r.comentario.trim());
+  var title = has ? 'Comentário de ' + (r.comentadoPor || '—') + ' em ' + (r.comentadoEm || '—') : 'Adicionar comentário';
+  return '<td><button type="button" class="comment-btn' + (has ? ' has-comment' : '') + '" title="' + esc(title) +
+    '" onclick="openComentarioModal(\'' + type + '\',' + i + ')">&#128172;</button></td>';
+}
+
 function renderRows(rows, p, type) {
   return rows.map(function(r, i) {
     var open = !p.locked && isSamePeriod(r, p.previsto);
@@ -1263,6 +1302,7 @@ function renderRows(rows, p, type) {
       '<td class="vt-calc vt-diario">' + fmtBRL(r.valorDiario) + '</td>' +
       '<td class="vt-calc vt-jae">' + (isSemRateio(r.unidade) ? '—' : fmtBRL(r.valorJae)) + '</td>' +
       '<td class="vt-calc vt-riocard">' + (isSemRateio(r.unidade) ? '—' : fmtBRL(r.valorRiocard)) + '</td>' +
+      commentCell(r, type, i) +
       delCell +
       '</tr>';
   }).join('');
@@ -1577,6 +1617,61 @@ function deleteRow(type, idx) {
     });
 }
 
+// ── COMENTÁRIO DE LANÇAMENTO (visível para diretor e DP, não é exportado no CSV/Sheets) ──
+
+var comentarioState = { categoria: null, idx: null, r: null };
+
+function openComentarioModal(categoria, idx) {
+  var r = findFilteredRow(categoria, idx);
+  if (!r) return;
+
+  comentarioState = { categoria: categoria, idx: idx, r: r };
+
+  document.getElementById('comentarioSub').textContent =
+    r.nome + ' — ' + MESES[r.mes - 1] + ' / ' + r.ano + ' (' + r.unidade + ')';
+  document.getElementById('comentarioTexto').value = r.comentario || '';
+  document.getElementById('comentarioMeta').textContent = r.comentadoEm
+    ? 'Último comentário: ' + (r.comentadoPor || '—') + ' em ' + r.comentadoEm
+    : '';
+  document.getElementById('comentarioStatus').textContent = '';
+  document.getElementById('comentarioStatus').className   = 'modal-status';
+
+  document.getElementById('comentarioModal').classList.add('open');
+}
+
+function salvarComentario() {
+  var r = comentarioState.r;
+  if (!r) return;
+
+  var texto  = document.getElementById('comentarioTexto').value.trim();
+  var status = document.getElementById('comentarioStatus');
+  var btn    = document.getElementById('comentarioSalvarBtn');
+
+  status.textContent = 'Salvando...';
+  status.className   = 'modal-status';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      btn.disabled = false;
+      r.comentario   = res.comentario;
+      r.comentadoEm  = res.comentadoEm;
+      r.comentadoPor = res.comentadoPor;
+      fecharModal('comentarioModal');
+      if (comentarioState.categoria === 'admin') renderAdminTable(); else renderDocenteTable();
+      setStatus('Comentário salvo!', 'success');
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      status.textContent = 'Erro: ' + (err.message || err);
+      status.className   = 'modal-status error';
+    })
+    .salvarComentarioVT({
+      token: TOKEN, categoria: comentarioState.categoria,
+      unidade: r.unidade, mes: r.mes, ano: r.ano, matricula: r.matricula,
+      comentario: texto
+    });
+}
 
 // ── TABS ────────────────────────────────────────────────────
 
