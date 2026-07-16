@@ -56,6 +56,17 @@ function norm_(s) {
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+// Algumas fontes (Hub, lançamentos antigos) chamam a mesma unidade de "NS" (na
+// verdade CH) ou "MRI" (na verdade MR). Toda unidade crua deve passar por aqui
+// assim que é lida, pra não duplicar a unidade em listas/filtros/lembretes.
+const UNIDADE_ALIASES_ = { ns: 'CH', mri: 'MR' };
+function canonUnidade_(u) {
+  u = String(u || '').trim();
+  if (!u) return u;
+  const alias = UNIDADE_ALIASES_[norm_(u)];
+  return alias || u;
+}
+
 // Extrai o número do mês mesmo quando a célula guarda texto como "06 Junho" (em vez de 6)
 function parseMes_(v) {
   return parseInt(String(v).trim(), 10) || 0;
@@ -142,7 +153,7 @@ function getSessionUser_(token) {
     // UNIDADE: vazio = todas; pipe-separado = restringe a essas
     const unidadeRaw = String(row[4] || '').trim();
     const units = unidadeRaw
-      ? unidadeRaw.split('|').map(function(u) { return u.trim(); }).filter(Boolean)
+      ? unidadeRaw.split('|').map(function(u) { return canonUnidade_(u); }).filter(Boolean)
       : [];
 
     return {
@@ -181,7 +192,7 @@ function getAllowedUnidades_(user) {
       const nome = String(funcRows[i][COL.NOME] || '').trim();
       if (!nome) continue;
       if (isInativo_(funcRows[i][COL.ATIVO])) continue;
-      const u = String(funcRows[i][COL.UNIDADE] || '').trim();
+      const u = canonUnidade_(funcRows[i][COL.UNIDADE]);
       if (u) set[u] = true;
     }
 
@@ -190,7 +201,7 @@ function getAllowedUnidades_(user) {
       const sheet = getOrCreateVTSheet_(vtSs, sheetName);
       const rows  = sheet.getDataRange().getValues();
       for (let i = 1; i < rows.length; i++) {
-        const u = String(rows[i][0] || '').trim();
+        const u = canonUnidade_(rows[i][0]);
         if (u) set[u] = true;
       }
     });
@@ -721,7 +732,7 @@ function getFuncionarios(token) {
     const list   = funcao === 'PROFESSOR' ? docente : administrativo;
 
     // Unidade principal + secundária, sem repetir se forem iguais
-    const unidades = [String(row[COL.UNIDADE]).trim(), String(row[COL.UNIDADE_SEC]).trim()]
+    const unidades = [canonUnidade_(row[COL.UNIDADE]), canonUnidade_(row[COL.UNIDADE_SEC])]
       .filter(function(u, idx, arr) { return u && arr.indexOf(u) === idx; });
 
     unidades.forEach(function(u) {
@@ -827,11 +838,11 @@ function getVTData(token) {
 
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
-      if (allowedNorm.indexOf(norm_(r[0])) === -1) continue;
+      if (allowedNorm.indexOf(norm_(canonUnidade_(r[0]))) === -1) continue;
       const mes = parseMes_(r[1]), ano = Number(r[2]);
       if (!mes || !ano) continue;
       out.push({
-        unidade: String(r[0]).trim(), mes: mes, ano: ano,
+        unidade: canonUnidade_(r[0]), mes: mes, ano: ano,
         matricula: String(r[3]).trim(), cpf: String(r[4]).trim(), nome: String(r[5]).trim(),
         tipoIda: String(r[6]).trim(), valorIda: r[7] || 0, qtdIda: r[8] || 0,
         tipoVolta: String(r[9]).trim(), valorVolta: r[10] || 0, qtdVolta: r[11] || 0,
@@ -871,9 +882,14 @@ function saveVTData(payload) {
   const adminSheet   = getOrCreateVTSheet_(ss, 'ADMINISTRATIVO');
   const docenteSheet = getOrCreateVTSheet_(ss, 'DOCENTE');
 
-  // Nunca confia na unidade vinda do cliente sem checar permissão
-  const adminEntries   = (payload.administrativo || []).filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
-  const docenteEntries = (payload.docente        || []).filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
+  // Nunca confia na unidade vinda do cliente sem checar permissão; normaliza NS→CH, MRI→MR
+  // antes de checar/gravar, pra planilha sempre guardar o código canônico.
+  const adminEntries   = (payload.administrativo || [])
+    .map(function(e) { e.unidade = canonUnidade_(e.unidade); return e; })
+    .filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
+  const docenteEntries = (payload.docente || [])
+    .map(function(e) { e.unidade = canonUnidade_(e.unidade); return e; })
+    .filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
 
   // Ordem espelha as colunas G-Y da aba: trecho 1 (G-L), calculados (M-Q), trecho 2 (R-U), trecho 3 (V-Y)
   function valuesFn(e) {
@@ -917,7 +933,7 @@ function _upsertRows_(sheet, entries, valuesFn, editorEmail) {
   const map = {};
   for (let i = 1; i < allRows.length; i++) {
     const r = allRows[i];
-    map[norm_(r[0]) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim()] = i + 1;
+    map[norm_(canonUnidade_(r[0])) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim()] = i + 1;
   }
 
   entries.forEach(function(e) {
@@ -980,6 +996,7 @@ function recalcularTudo() {
 function deleteVTEntry(payload) {
   const user = getSessionUser_(payload.token);
   if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+  payload.unidade = canonUnidade_(payload.unidade);
   if (!isUserAllowedUnit_(user, payload.unidade)) throw new Error('Você não tem permissão para esta unidade.');
 
   const period = getCurrentPeriod(payload.token);
@@ -996,7 +1013,7 @@ function deleteVTEntry(payload) {
   const rows = sheet.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    const k = norm_(r[0]) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim();
+    const k = norm_(canonUnidade_(r[0])) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim();
     if (k === key) {
       sheet.deleteRow(i + 1);
       return { success: true };
@@ -1005,6 +1022,258 @@ function deleteVTEntry(payload) {
 
   // Linha não encontrada na planilha (provavelmente nunca foi salva) — nada a fazer
   return { success: true };
+}
+
+// =============================================================================
+// LEMBRETES DE PREENCHIMENTO DO VT — gatilhos mensais (dias 1, 5, 9 e 11)
+// =============================================================================
+// Dia 1 : aviso de abertura do período, para todas as unidades (incondicional)
+// Dia 5, 9 e 11: lembrete só para quem ainda não preencheu o mês Previsto;
+//                dia 11 avisa que é o último dia antes do bloqueio automático.
+// Unidades em UNIDADES_SEM_RATEIO (hoje só VO) ficam fora — fora do escopo v1.
+
+// Lista fixa de e-mail do diretor por unidade (mesma usada no VR — passada
+// manualmente pela Adriane, mais confiável que derivar da planilha do Hub).
+// Observação: o cadastro do Hub usa "NS" e "MRI", mas os lançamentos de
+// VR/VT usam "CH" e "MR" — por isso o mapeamento já usa os códigos da planilha.
+const DIRETORES_UNIDADE = {
+  'bf':     ['dirbf@brasas.com'],
+  'bg':     ['dirbg@brasas.com'],
+  'cg':     ['dircg@brasas.com'],
+  'ch':     ['dirch@brasas.com'],  // cadastrado como "NS" no Hub
+  'cp':     ['dircp@brasas.com'],
+  'cx':     ['dircx@brasas.com'],
+  'dt':     ['dirdt@brasas.com'],
+  'fg':     ['dirfg@brasas.com'],
+  'ig':     ['marcelo.ig@brasas.com'],
+  'ip':     ['dirip@brasas.com'],
+  'it':     ['dirit@brasas.com'],
+  'lj':     ['dirlj@brasas.com'],
+  'mr':     ['dirmr@brasas.com'],  // cadastrado como "MRI" no Hub
+  'ni':     ['dirni@brasas.com'],
+  'nl':     ['dirnl@brasas.com'],
+  'nt':     ['dirnt@brasas.com'],
+  'pc':     ['dirpc@brasas.com'],
+  'po':     ['dirpo@brasas.com'],
+  'rc':     ['dirrc@brasas.com'],
+  'tj':     ['dirtj@brasas.com'],
+  'tq':     ['dirtq@brasas.com'],
+  'vp':     ['dirvp@brasas.com'],
+  'vq':     ['dirvq@brasas.com'],
+  'pn':     ['dirpn@brasas.com'],
+  'online': ['natasha@brasas.com'],
+  'bod':    ['pat@brasas.com'],
+  'gr':     ['dirgr@brasas.com'],
+  'vo':     ['dirvo@brasas.com']
+};
+
+// Calcula o mês/ano "Previsto" (mês seguinte ao atual) a partir de hoje —
+// mesma regra de getCurrentPeriod, mas sem depender de sessão/token.
+function getPeriodoPrevistoAtual_() {
+  const now = new Date();
+  let mes = now.getMonth() + 2; // mês atual (1-based) + 1
+  let ano = now.getFullYear();
+  if (mes > 12) { mes -= 12; ano++; }
+  return { mes: mes, ano: ano };
+}
+
+// Retorna o mapa unidade -> [e-mails de diretor]. Unidades fora de
+// DIRETORES_UNIDADE (ex.: EDITORA, EC NEW, MÉTODOS) não têm e-mail cadastrado
+// e são puladas pelo restante do fluxo de lembretes.
+function getMapaDiretoresPorUnidade_() {
+  return DIRETORES_UNIDADE;
+}
+
+// Unidades que têm ao menos um funcionário ativo cadastrado (mesma fonte
+// usada no resto do app: aba "RJ - UNIDADES", coluna Unidade Ajustada).
+// VO entra normalmente aqui — ela já preenche VT, só não tem divisão Jaé/RioCard
+// (isso é tratado à parte em calcularVT_ via UNIDADES_SEM_RATEIO).
+function getUnidadesAtivas_() {
+  const sheet = SpreadsheetApp.openById(FUNC_SHEET_ID).getSheetByName('RJ - UNIDADES');
+  if (!sheet) throw new Error('Aba "RJ - UNIDADES" não encontrada.');
+  const rows = sheet.getDataRange().getValues();
+
+  const set = {};
+  for (let i = 1; i < rows.length; i++) {
+    const nome = String(rows[i][COL.NOME] || '').trim();
+    if (!nome) continue;
+    if (isInativo_(rows[i][COL.ATIVO])) continue;
+    const u = canonUnidade_(rows[i][COL.UNIDADE]);
+    if (u) set[u] = true;
+  }
+  return Object.keys(set);
+}
+
+// Unidades que já têm ao menos um lançamento salvo para o mês/ano informado
+// (em ADMINISTRATIVO ou DOCENTE) — usado para saber quem ainda falta preencher.
+function getUnidadesPreenchidas_(mes, ano) {
+  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
+  const preenchidas = {};
+
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(sheetName) {
+    const sheet = getOrCreateVTSheet_(ss, sheetName);
+    const rows  = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (parseMes_(r[1]) === mes && Number(r[2]) === ano) {
+        const u = canonUnidade_(r[0]);
+        if (u) preenchidas[norm_(u)] = true;
+      }
+    }
+  });
+
+  return preenchidas;
+}
+
+// Ponto de entrada dos gatilhos — dia: 1 (abertura), 5, 9 ou 11 (último dia)
+function verificarEEnviarLembretesVT_(dia) {
+  const periodo      = getPeriodoPrevistoAtual_();
+  const mesLabel      = mesLabel_(periodo.mes);
+  const diretores     = getMapaDiretoresPorUnidade_();
+  const unidades      = getUnidadesAtivas_();
+  const preenchidas   = dia === 1 ? {} : getUnidadesPreenchidas_(periodo.mes, periodo.ano);
+
+  unidades.forEach(function(unidade) {
+    const key = norm_(unidade);
+    if (dia !== 1 && preenchidas[key]) return; // já preencheu — não incomoda mais
+
+    const emails = diretores[key];
+    if (!emails || !emails.length) return; // sem e-mail de diretor cadastrado — pula
+
+    enviarEmailLembreteVT_(emails, unidade, mesLabel, dia);
+  });
+}
+
+// Monta e envia o e-mail de abertura/lembrete para uma unidade
+function enviarEmailLembreteVT_(emails, unidade, mesLabel, dia) {
+  try {
+    const destinatarios = emails.join(',');
+
+    let assunto, tituloBarra, corBarra, mensagemPrincipal, avisoDestaque;
+
+    if (dia === 1) {
+      assunto = 'Preenchimento do Vale Transporte está aberto — ' + unidade;
+      tituloBarra = 'Preenchimento do Vale Transporte — Período Aberto';
+      corBarra = '#0a1628';
+      mensagemPrincipal = 'O período para preenchimento do <strong>Vale Transporte</strong> de <strong>' + escHtml_(mesLabel) + '</strong> está aberto.';
+      avisoDestaque = 'Prazo final para preencher: <strong>dia 11</strong>. Após essa data, a edição é bloqueada automaticamente.';
+    } else if (dia === 5) {
+      assunto = 'Lembrete: Vale Transporte ainda não preenchido — ' + unidade;
+      tituloBarra = 'Lembrete — Vale Transporte Pendente';
+      corBarra = '#b45309';
+      mensagemPrincipal = 'Identificamos que o <strong>Vale Transporte</strong> de <strong>' + escHtml_(mesLabel) + '</strong> da sua unidade ainda não foi preenchido.';
+      avisoDestaque = 'Prazo final para preencher: <strong>dia 11</strong>. Após essa data, a edição é bloqueada automaticamente.';
+    } else if (dia === 9) {
+      assunto = '2º lembrete: Vale Transporte ainda não preenchido — ' + unidade;
+      tituloBarra = '2º Lembrete — Vale Transporte Pendente';
+      corBarra = '#c2410c';
+      mensagemPrincipal = 'O <strong>Vale Transporte</strong> de <strong>' + escHtml_(mesLabel) + '</strong> da sua unidade ainda não foi preenchido.';
+      avisoDestaque = 'Restam poucos dias! Prazo final: <strong>dia 11</strong>. Após essa data, a edição é bloqueada automaticamente.';
+    } else { // dia 11
+      assunto = 'ÚLTIMO DIA para preencher o Vale Transporte — ' + unidade;
+      tituloBarra = 'Último Dia — Vale Transporte Pendente';
+      corBarra = '#dc2626';
+      mensagemPrincipal = 'Hoje é o <strong>último dia</strong> para preencher o <strong>Vale Transporte</strong> de <strong>' + escHtml_(mesLabel) + '</strong> da sua unidade.';
+      avisoDestaque = 'Após hoje (23:59), a edição será bloqueada automaticamente e só poderá ser liberada mediante solicitação ao Departamento Pessoal.';
+    }
+
+    const corpoTexto =
+      'Olá.\n\n' +
+      mensagemPrincipal.replace(/<\/?strong>/g, '') + '\n\n' +
+      avisoDestaque.replace(/<\/?strong>/g, '') + '\n\n' +
+      'Unidade: ' + unidade + '\n' +
+      'Mês de referência: ' + mesLabel + '\n\n' +
+      'Acesse pelo Hub BRASAS BI: ' + HUB_URL + '\n\n' +
+      'Equipe BRASAS BI';
+
+    const corpoHtml =
+      '<div style="background:#f1f5f9;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">' +
+        '<div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0">' +
+          '<div style="background:' + corBarra + ';padding:26px 32px">' +
+            '<h1 style="margin:0;color:#ffffff;font-size:20px;font-weight:700;line-height:1.3">' + tituloBarra + '</h1>' +
+          '</div>' +
+          '<div style="padding:28px 32px">' +
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:13px;color:#475569">' +
+              '&#9888;&#65039; Este é um comunicado automático. <strong>Não responda este e-mail</strong> — em caso de dúvidas, entre em contato com o Departamento Pessoal pelo endereço <a href="mailto:dp@brasas.com" style="color:#2a4d76">dp@brasas.com</a>.' +
+            '</div>' +
+            '<p style="margin:0 0 14px;font-size:15px;color:#0f2035;line-height:1.6">' + mensagemPrincipal + '</p>' +
+            '<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:14px 16px;margin-bottom:22px;font-size:14px;color:#92400e;line-height:1.5">' +
+              '&#9200; ' + avisoDestaque +
+            '</div>' +
+            '<div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:18px 20px;margin-bottom:24px">' +
+              '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:14px">Dados do lançamento</div>' +
+              '<table style="width:100%;border-collapse:collapse;font-size:14px">' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b;width:150px">Unidade:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + escHtml_(unidade) + '</td>' +
+                '</tr>' +
+                '<tr>' +
+                  '<td style="padding:6px 0;color:#64748b">Mês de referência:</td>' +
+                  '<td style="padding:6px 0;color:#0f2035;font-weight:600">' + escHtml_(mesLabel) + '</td>' +
+                '</tr>' +
+              '</table>' +
+            '</div>' +
+            '<div style="text-align:center;margin-bottom:8px">' +
+              '<a href="' + HUB_URL + '" style="display:inline-block;background:#0f2035;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px">' +
+                'Preencher o Vale Transporte' +
+              '</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    MailApp.sendEmail(destinatarios, assunto, corpoTexto, { htmlBody: corpoHtml, name: 'Vale Transporte — BRASAS BI' });
+  } catch (e) {
+    Logger.log('enviarEmailLembreteVT_: falha ao enviar para ' + emails + ' (unidade ' + unidade + ') — ' + e);
+  }
+}
+
+// Funções chamadas pelos gatilhos instalados (uma para cada dia)
+function lembreteVTDia1()  { verificarEEnviarLembretesVT_(1); }
+function lembreteVTDia5()  { verificarEEnviarLembretesVT_(5); }
+function lembreteVTDia9()  { verificarEEnviarLembretesVT_(9); }
+function lembreteVTDia11() { verificarEEnviarLembretesVT_(11); }
+
+// Roda ISSO UMA VEZ no editor do Apps Script (Ctrl+Enter) para instalar os
+// 4 gatilhos mensais. Pode rodar de novo com segurança — remove os antigos antes.
+function instalarGatilhosLembreteVT() {
+  const handlers = ['lembreteVTDia1', 'lembreteVTDia5', 'lembreteVTDia9', 'lembreteVTDia11'];
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (handlers.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
+  });
+
+  ScriptApp.newTrigger('lembreteVTDia1').timeBased().onMonthDay(1).atHour(8).create();
+  ScriptApp.newTrigger('lembreteVTDia5').timeBased().onMonthDay(5).atHour(8).create();
+  ScriptApp.newTrigger('lembreteVTDia9').timeBased().onMonthDay(9).atHour(8).create();
+  ScriptApp.newTrigger('lembreteVTDia11').timeBased().onMonthDay(11).atHour(8).create();
+
+  Logger.log('Gatilhos de lembrete do VT instalados com sucesso.');
+}
+
+// Simula um lembrete SEM enviar e-mails — só loga quem receberia e por quê.
+// Rode no editor (Ctrl+Enter), ajustando "dia" abaixo, para validar antes de
+// instalar os gatilhos de verdade.
+function diagnosticoLembretesVT() {
+  const dia = 5; // ajuste para 1, 5, 9 ou 11 antes de rodar
+
+  const periodo    = getPeriodoPrevistoAtual_();
+  const mesLabel    = mesLabel_(periodo.mes);
+  const diretores   = getMapaDiretoresPorUnidade_();
+  const unidades    = getUnidadesAtivas_();
+  const preenchidas = dia === 1 ? {} : getUnidadesPreenchidas_(periodo.mes, periodo.ano);
+
+  Logger.log('=== SIMULAÇÃO — dia %s | mês previsto: %s/%s ===', dia, mesLabel, periodo.ano);
+  unidades.forEach(function(unidade) {
+    const key = norm_(unidade);
+    const emails = diretores[key] || [];
+    if (dia !== 1 && preenchidas[key]) {
+      Logger.log('%s → já preenchida, não envia', unidade);
+    } else if (!emails.length) {
+      Logger.log('%s → SEM e-mail de diretor cadastrado, pula', unidade);
+    } else {
+      Logger.log('%s → enviaria para: %s', unidade, emails.join(', '));
+    }
+  });
 }
 
 // =============================================================================
