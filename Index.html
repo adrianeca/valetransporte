@@ -228,13 +228,20 @@ input[type=number]:disabled {
   margin-bottom:18px;box-shadow:var(--shadow-sm);
 }
 .filter-row {display:flex;gap:28px;flex-wrap:wrap;align-items:center}
+.filter-actions {margin-left:auto;display:flex;gap:10px;align-items:center}
 .clear-filters-btn {
-  margin-left:auto;
   background:var(--white);border:1.5px solid var(--gray-200);border-radius:8px;
   padding:9px 16px;font-family:var(--font);font-size:.85rem;font-weight:600;
   color:var(--gray-500);cursor:pointer;transition:border-color .15s,color .15s;
 }
 .clear-filters-btn:hover {border-color:var(--navy-300);color:var(--navy-700)}
+.export-csv-btn {
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--white);border:1.5px solid var(--navy-300);border-radius:8px;
+  padding:9px 16px;font-family:var(--font);font-size:.85rem;font-weight:600;
+  color:var(--navy-700);cursor:pointer;transition:background .15s;
+}
+.export-csv-btn:hover {background:var(--navy-50)}
 
 .copy-btn {
   display:inline-flex;align-items:center;gap:7px;
@@ -520,7 +527,10 @@ input[type=number]:disabled {
             <div class="multiselect-panel" id="monthFilterPanel"></div>
           </div>
         </div>
-        <button type="button" class="clear-filters-btn" onclick="clearFilters()">Limpar filtros</button>
+        <div class="filter-actions">
+          <button type="button" class="export-csv-btn" onclick="exportCSV()">&#8681; Exportar CSV</button>
+          <button type="button" class="clear-filters-btn" onclick="clearFilters()">Limpar filtros</button>
+        </div>
       </div>
     </div>
 
@@ -988,6 +998,62 @@ function passesFilter(r) {
   if (state.yearFilter.length  && state.yearFilter.indexOf(String(r.ano)) === -1) return false;
   if (state.monthFilter.length && state.monthFilter.indexOf(String(r.mes)) === -1) return false;
   return true;
+}
+
+// ── EXPORTAÇÃO CSV (respeita os filtros aplicados e a aba ativa no momento) ──
+
+function csvEscape(val) {
+  var s = (val === null || val === undefined) ? '' : String(val);
+  if (/[",\n\r;]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+var CSV_BOM = String.fromCharCode(0xFEFF);
+
+function downloadCsv(filename, lines) {
+  var csvContent = CSV_BOM + lines.join('\r\n');
+  var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function activeTab() {
+  var btn = document.querySelector('.tab-btn.active');
+  return btn ? btn.getAttribute('data-tab') : 'admin';
+}
+
+function exportCSV() {
+  var tab   = activeTab();
+  if (tab !== 'admin' && tab !== 'docente') { alert('Selecione a aba Administrativo ou Docente para exportar.'); return; }
+
+  var rows = (tab === 'admin' ? state.adminRows : state.docenteRows).filter(passesFilter);
+  if (!rows.length) { alert('Nenhum registro para exportar com os filtros atuais.'); return; }
+
+  var header = ['Unidade', 'Mês', 'Ano', 'Matrícula', 'CPF', 'Funcionário',
+    'Tipo Ida 1', 'Valor Ida 1', 'Tipo Ida 2', 'Valor Ida 2', 'Tipo Ida 3', 'Valor Ida 3', 'Qtd Ida',
+    'Tipo Volta 1', 'Valor Volta 1', 'Tipo Volta 2', 'Valor Volta 2', 'Tipo Volta 3', 'Valor Volta 3', 'Qtd Volta',
+    'Total', 'Dias Trab.', 'Valor Diário', 'Valor Jaé', 'Valor RioCard'];
+
+  var lines = [header.map(csvEscape).join(',')];
+  rows.forEach(function(r) {
+    var semRateio = isSemRateio(r.unidade);
+    var line = [
+      r.unidade, MESES[r.mes - 1], r.ano, r.matricula, r.cpf, r.nome,
+      r.tipoIda || '', Number(r.valorIda) || 0, r.tipoIda2 || '', Number(r.valorIda2) || 0, r.tipoIda3 || '', Number(r.valorIda3) || 0, Number(r.qtdIda) || 0,
+      r.tipoVolta || '', Number(r.valorVolta) || 0, r.tipoVolta2 || '', Number(r.valorVolta2) || 0, r.tipoVolta3 || '', Number(r.valorVolta3) || 0, Number(r.qtdVolta) || 0,
+      Number(r.total) || 0, Number(r.diasTrabalhados) || 0, Number(r.valorDiario) || 0,
+      semRateio ? '' : Number(r.valorJae) || 0, semRateio ? '' : Number(r.valorRiocard) || 0
+    ];
+    lines.push(line.map(csvEscape).join(','));
+  });
+
+  downloadCsv('vt_' + tab + '_' + new Date().toISOString().slice(0, 10) + '.csv', lines);
 }
 
 function renderUnitLabel() {
