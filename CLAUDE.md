@@ -64,6 +64,19 @@ Gatilhos mensais (dias 1, 5, 9 e 11), instalados manualmente uma vez rodando `in
 - Antes de instalar os gatilhos de verdade, rodar `diagnosticoLembretesVT()` (ajustando a variável `dia` no topo da função) — só loga no console quem receberia o quê, **não envia e-mail nenhum**.
 - Template de e-mail: mesma identidade visual do resto do app (faixa colorida no topo — azul na abertura, âmbar/laranja/vermelho conforme a urgência sobe — aviso "comunicado automático", caixa de destaque, box "Dados do lançamento").
 
+## Convenções do Apps Script — funções ocultas (underscore final)
+
+No Apps Script, função cujo nome termina em `_` é tratada como **privada**: ela não aparece no seletor de funções do editor (menu Executar fica "Nenhuma função" se só existirem funções assim), não pode ser gatilho e não é chamável via `google.script.run`. O código compila e roda normalmente — só fica invisível na UI, o que engana como se fosse arquivo corrompido ou erro de sintaxe.
+
+Regra prática para qualquer script deste projeto:
+
+- Função feita para rodar manualmente no editor (ex.: `recalcularTudo`, `diagnosticoVT`, `instalarGatilhosLembreteVT`, `migrarBF`): nome **sem** `_` final e **sem parâmetros** (o menu Executar não passa argumentos — se precisar de parâmetros, criar um wrapper sem parâmetro com os valores fixos).
+- Função auxiliar interna (ex.: `norm_`, `calcularVT_`, `_upsertRows_`): manter o `_` final de propósito, justamente pra não poluir o menu Executar.
+
+## Migração das planilhas antigas (`Migracao_VT.gs`)
+
+Script independente do webapp (não entra no deploy do `Code.gs`/`Index.html`), colado num projeto de Apps Script à parte em script.google.com. Migra as ~20 planilhas antigas por unidade (uma aba por mês, seções ADMINISTRATIVO/PROFESSORES na mesma aba) para a planilha central do VT, em 3 etapas: `migrarBF()` (ou `migrarPlanilhaAntigaVT(id, unidade, ano)`) gera uma planilha de staging para revisão → revisão manual da coluna "Alerta" (CPF suspeito, total divergente, duplicado no mês) → `aplicarStagingVT(stagingSheetId)` grava na planilha oficial pulando chaves que já existam lá. Todos os nomes internos usam prefixo `vtmig`/`VTMIG_` para não colidir com outros scripts; recalcula tudo com cópia do `calcularVT_` (nunca confia nos valores prontos das planilhas antigas); OBS antiga vira Comentário; Bilhete Único é descartado; a 3ª coluna Tipo/Valor/Qtd (formato Jan–Abr) vira Ida 2.
+
 ## Deploy
 
 1. Copiar `Code.gs` e `Index.html` pro editor do Apps Script do projeto vinculado à planilha `VT_SHEET_ID`.
