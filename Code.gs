@@ -1277,6 +1277,45 @@ function diagnosticoLembretesVT() {
 }
 
 // =============================================================================
+// EXPORTAÇÃO PARA GOOGLE SHEETS — cria uma planilha nova só com as linhas que o
+// diretor já filtrou no navegador (mesmo conjunto de dados do "Exportar CSV";
+// o Index.html manda o header + as linhas já filtradas, prontas para gravar).
+// =============================================================================
+
+function exportFilteredToSheet(token, payload) {
+  const user = getSessionUser_(token);
+  if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+
+  const header = (payload && payload.header) || [];
+  const rowsIn = (payload && payload.rows) || [];
+  if (!header.length) throw new Error('Nada para exportar.');
+  if (rowsIn.length > 5000) throw new Error('Muitos registros para exportar de uma vez.');
+
+  // Garante retângulo perfeito (mesma largura do header) mesmo se alguma linha vier truncada
+  const rows = rowsIn.map(function(r) {
+    r = r || [];
+    const out = new Array(header.length);
+    for (let i = 0; i < header.length; i++) out[i] = (r[i] === undefined || r[i] === null) ? '' : r[i];
+    return out;
+  });
+
+  const titleBase = String((payload && payload.title) || 'Exportação').slice(0, 80);
+  const carimbo   = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy HH:mm');
+  const ss        = SpreadsheetApp.create(titleBase + ' — ' + carimbo);
+  const sheet     = ss.getSheets()[0];
+
+  sheet.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold');
+  if (rows.length) sheet.getRange(2, 1, rows.length, header.length).setValues(rows);
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, header.length);
+
+  // A planilha nasce na conta que executa o script; sem isso o diretor não a veria
+  try { ss.addEditor(user.email); } catch (e) { Logger.log('exportFilteredToSheet addEditor: ' + e); }
+
+  return ss.getUrl();
+}
+
+// =============================================================================
 // DIAGNÓSTICO — rode no editor do Apps Script e veja os logs (Ctrl+Enter)
 // =============================================================================
 

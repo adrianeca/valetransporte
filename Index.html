@@ -529,6 +529,7 @@ input[type=number]:disabled {
         </div>
         <div class="filter-actions">
           <button type="button" class="export-csv-btn" onclick="exportCSV()">&#8681; Exportar CSV</button>
+          <button type="button" class="export-csv-btn" id="exportSheetBtn" onclick="exportToSheet()">&#9638; Planilha Google</button>
           <button type="button" class="clear-filters-btn" onclick="clearFilters()">Limpar filtros</button>
         </div>
       </div>
@@ -1028,32 +1029,63 @@ function activeTab() {
   return btn ? btn.getAttribute('data-tab') : 'admin';
 }
 
-function exportCSV() {
-  var tab   = activeTab();
-  if (tab !== 'admin' && tab !== 'docente') { alert('Selecione a aba Administrativo ou Docente para exportar.'); return; }
+function buildExportData() {
+  var tab = activeTab();
+  if (tab !== 'admin' && tab !== 'docente') return null;
 
   var rows = (tab === 'admin' ? state.adminRows : state.docenteRows).filter(passesFilter);
-  if (!rows.length) { alert('Nenhum registro para exportar com os filtros atuais.'); return; }
-
   var header = ['Unidade', 'Mês', 'Ano', 'Matrícula', 'CPF', 'Funcionário',
     'Tipo Ida 1', 'Valor Ida 1', 'Tipo Ida 2', 'Valor Ida 2', 'Tipo Ida 3', 'Valor Ida 3', 'Qtd Ida',
     'Tipo Volta 1', 'Valor Volta 1', 'Tipo Volta 2', 'Valor Volta 2', 'Tipo Volta 3', 'Valor Volta 3', 'Qtd Volta',
     'Total', 'Dias Trab.', 'Valor Diário', 'Valor Jaé', 'Valor RioCard'];
 
-  var lines = [header.map(csvEscape).join(',')];
-  rows.forEach(function(r) {
+  var data = rows.map(function(r) {
     var semRateio = isSemRateio(r.unidade);
-    var line = [
+    return [
       r.unidade, MESES[r.mes - 1], r.ano, r.matricula, r.cpf, r.nome,
       r.tipoIda || '', Number(r.valorIda) || 0, r.tipoIda2 || '', Number(r.valorIda2) || 0, r.tipoIda3 || '', Number(r.valorIda3) || 0, Number(r.qtdIda) || 0,
       r.tipoVolta || '', Number(r.valorVolta) || 0, r.tipoVolta2 || '', Number(r.valorVolta2) || 0, r.tipoVolta3 || '', Number(r.valorVolta3) || 0, Number(r.qtdVolta) || 0,
       Number(r.total) || 0, Number(r.diasTrabalhados) || 0, Number(r.valorDiario) || 0,
       semRateio ? '' : Number(r.valorJae) || 0, semRateio ? '' : Number(r.valorRiocard) || 0
     ];
-    lines.push(line.map(csvEscape).join(','));
   });
 
-  downloadCsv('vt_' + tab + '_' + new Date().toISOString().slice(0, 10) + '.csv', lines);
+  return { tab: tab, header: header, rows: data };
+}
+
+function exportCSV() {
+  var ex = buildExportData();
+  if (!ex) { alert('Selecione a aba Administrativo ou Docente para exportar.'); return; }
+  if (!ex.rows.length) { alert('Nenhum registro para exportar com os filtros atuais.'); return; }
+
+  var lines = [ex.header.map(csvEscape).join(',')];
+  ex.rows.forEach(function(row) { lines.push(row.map(csvEscape).join(',')); });
+
+  downloadCsv('vt_' + ex.tab + '_' + new Date().toISOString().slice(0, 10) + '.csv', lines);
+}
+
+function exportToSheet() {
+  var ex = buildExportData();
+  if (!ex) { alert('Selecione a aba Administrativo ou Docente para exportar.'); return; }
+  if (!ex.rows.length) { alert('Nenhum registro para exportar com os filtros atuais.'); return; }
+
+  var btn = document.getElementById('exportSheetBtn');
+  var originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Gerando planilha…';
+
+  google.script.run
+    .withSuccessHandler(function(url) {
+      btn.disabled = false;
+      btn.innerHTML = originalLabel;
+      window.open(url, '_blank');
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      btn.innerHTML = originalLabel;
+      alert('Erro ao gerar a planilha: ' + (err && err.message ? err.message : err));
+    })
+    .exportFilteredToSheet(TOKEN, { header: ex.header, rows: ex.rows, title: 'VT ' + (ex.tab === 'admin' ? 'Administrativo' : 'Docente') });
 }
 
 function renderUnitLabel() {
