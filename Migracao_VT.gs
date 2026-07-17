@@ -42,9 +42,21 @@ var VTMIG_SHEET_ID = '1zDOd3nUIojbDVPgglDfZ5wsEOldwCcOGjLeh_YkU4yU';
 // VTMIG_UNIDADE, rode gerarStaging(), revise a planilha gerada e rode
 // aplicarStaging(). A planilha antiga e achada sozinha na pasta pelo padrao
 // de nome "<UNIDADE> - VT - <ano>".
+//
+// Para migrar VARIAS unidades de uma vez NA MESMA planilha de staging, use
+// gerarStagingVarias() / aplicarStagingVarias() em vez de
+// gerarStaging()/aplicarStaging(): eles preenchem VTMIG_UNIDADES abaixo
+// (deixe [] para pegar TODAS as unidades achadas na pasta do Drive), leem
+// cada planilha antiga e juntam tudo numa UNICA planilha de staging (uma aba
+// ADMINISTRATIVO e uma DOCENTE, com todas as unidades misturadas - a coluna
+// Unidade de cada linha distingue). Revisa-se so essa planilha, e
+// aplicarStagingVarias() aplica tudo de uma vez na planilha oficial.
+// VTMIG_UNIDADE (singular) continua servindo so para gerarStaging()/
+// aplicarStaging() de uma unidade so, numa planilha de staging separada.
 // =============================================================================
 var VTMIG_PASTA_ID = '1nn4sbeaDl98uatuhpppYNTkLPQ0A4X8s'; // pasta do Drive com as planilhas antigas de VT
 var VTMIG_UNIDADE  = 'BF';
+var VTMIG_UNIDADES = []; // ex.: ['BF', 'BG', 'CH'] - [] = todas as unidades achadas na pasta
 
 function gerarStaging() {
   var antiga = vtmigAcharPlanilhaAntiga_(VTMIG_UNIDADE);
@@ -59,6 +71,72 @@ function aplicarStaging() {
   var antiga  = vtmigAcharPlanilhaAntiga_(unidade);
   var id = PropertiesService.getScriptProperties().getProperty(vtmigStagingProp_(unidade, antiga.ano));
   if (!id) throw new Error('Nenhuma staging registrada para ' + unidade + '/' + antiga.ano + ' - rode gerarStaging() primeiro (ou, para uma staging avulsa, chame aplicarStagingVT(id) direto no codigo).');
+  aplicarStagingVT(id);
+}
+
+// Lista de unidades a percorrer em gerarStagingVarias()/aplicarStagingVarias():
+// VTMIG_UNIDADES se preenchida, senao todas as unidades unicas achadas na pasta.
+function vtmigListaUnidadesLote_() {
+  if (VTMIG_UNIDADES && VTMIG_UNIDADES.length) return VTMIG_UNIDADES;
+  var vistos = {}, out = [];
+  vtmigPlanilhasDaPasta_().forEach(function(p) {
+    if (!vistos[p.unidade]) { vistos[p.unidade] = true; out.push(p.unidade); }
+  });
+  return out;
+}
+
+// Nome da Script Property que guarda o ID da ultima staging EM LOTE gerada -
+// e a ponte entre gerarStagingVarias() e aplicarStagingVarias().
+var VTMIG_STAGING_LOTE_PROP = 'vtmig_staging_lote';
+
+// Le cada unidade de vtmigListaUnidadesLote_() (mesma leitura/recalculo de
+// migrarPlanilhaAntigaVT) e junta tudo numa UNICA planilha de staging - uma
+// aba ADMINISTRATIVO e uma DOCENTE com todas as unidades misturadas (a
+// coluna Unidade de cada linha distingue quem e quem). Uma unidade com erro
+// (planilha nao encontrada, aba vazia etc.) NAO interrompe as demais - fica
+// no resumo de falhas no final do log, e as outras entram normalmente na
+// staging. Revise essa UNICA planilha e so depois rode aplicarStagingVarias().
+function gerarStagingVarias() {
+  var unidades = vtmigListaUnidadesLote_();
+  Logger.log('Gerando staging em lote para %s unidade(s): %s', unidades.length, unidades.join(', '));
+
+  var funcIdx = vtmigIndiceFuncionarios_(); // le a planilha de funcionarios uma vez so, para todas as unidades
+  var combinado = { ADMINISTRATIVO: [], DOCENTE: [] };
+  var ok = [], falhas = [];
+
+  unidades.forEach(function(u) {
+    try {
+      var antiga = vtmigAcharPlanilhaAntiga_(u);
+      var lido = vtmigLerPlanilhaAntiga_(antiga.id, u, antiga.ano, funcIdx);
+      combinado.ADMINISTRATIVO = combinado.ADMINISTRATIVO.concat(lido.stageRows.ADMINISTRATIVO);
+      combinado.DOCENTE        = combinado.DOCENTE.concat(lido.stageRows.DOCENTE);
+      Logger.log('OK - %s/%s ("%s"):\n%s', u, antiga.ano, antiga.nome, lido.resumoAbas.join('\n'));
+      ok.push(u);
+    } catch (e) {
+      Logger.log('FALHOU - %s: %s', u, e.message);
+      falhas.push(u + ': ' + e.message);
+    }
+  });
+
+  if (!ok.length) throw new Error('Nenhuma unidade migrada com sucesso - staging NAO criada. Veja os erros no log.');
+
+  var carimbo = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy HH:mm');
+  var staging = vtmigCriarStagingSs_('VT Migracao LOTE - ' + carimbo, combinado);
+  PropertiesService.getScriptProperties().setProperty(VTMIG_STAGING_LOTE_PROP, staging.id);
+
+  Logger.log('--- Resumo gerarStagingVarias ---');
+  Logger.log('OK (%s): %s', ok.length, ok.join(', '));
+  Logger.log('Falhas (%s):%s', falhas.length, falhas.length ? '\n' + falhas.join('\n') : ' -');
+  Logger.log('Staging em lote pronta para revisao: %s', staging.url);
+  Logger.log('Depois de revisar, rode aplicarStagingVarias() - o ID ja ficou guardado.');
+}
+
+// Aplica a staging EM LOTE (gerarStagingVarias()) inteira de uma vez na
+// planilha oficial - aplicarStagingVT ja le a Unidade de cada linha, entao
+// nao importa quantas unidades diferentes estao misturadas na mesma staging.
+function aplicarStagingVarias() {
+  var id = PropertiesService.getScriptProperties().getProperty(VTMIG_STAGING_LOTE_PROP);
+  if (!id) throw new Error('Nenhuma staging em lote registrada - rode gerarStagingVarias() primeiro.');
   aplicarStagingVT(id);
 }
 
@@ -222,6 +300,9 @@ function vtmigGetOrCreateSheet_(ss, name) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(VTMIG_HEADERS[name]);
     sheet.setFrozenRows(1);
+    // Forca texto puro na coluna Mes (B) - sem isso o Sheets reconhece "01
+    // Janeiro" como data de verdade e reformata o mes em minusculo.
+    sheet.getRange('B:B').setNumberFormat('@');
   } else if (sheet.getLastRow() > 0 && String(sheet.getRange(1, 10).getValue()).trim() !== VTMIG_HEADERS[name][9]) {
     // Layout antigo (Tipo Ida 2 na coluna R; no novo a J e Tipo Ida 2)
     throw new Error('A aba "' + name + '" da planilha oficial esta no layout antigo de colunas - rode reorganizarColunasVT() no projeto do webapp (Code.gs) antes de aplicar a staging.');
@@ -388,13 +469,20 @@ function vtmigMesclarLinha_(alvo, novo) {
 // =============================================================================
 // ETAPA 1 - le a planilha antiga e cria a planilha de staging para revisao.
 // =============================================================================
-function migrarPlanilhaAntigaVT(oldSheetId, unidade, ano) {
+
+// Le uma planilha antiga (todas as abas de mes, secoes ADMINISTRATIVO/
+// PROFESSORES) e devolve as linhas prontas para staging, SEM criar nenhuma
+// planilha - usado tanto por migrarPlanilhaAntigaVT (staging de 1 unidade)
+// quanto por gerarStagingVarias (staging em lote, varias unidades juntas).
+// funcIdx e opcional - se nao vier, le a planilha de funcionarios na hora
+// (fica mais rapido passar um ja pronto quando for ler varias unidades seguidas).
+function vtmigLerPlanilhaAntiga_(oldSheetId, unidade, ano, funcIdx) {
   unidade = vtmigCanonUnidade_(unidade);
   var oldSs = SpreadsheetApp.openById(oldSheetId);
 
   var stageRows = { ADMINISTRATIVO: [], DOCENTE: [] };
   var vistos = {}; // chave unidade|mes|ano|matricula -> linhas de staging ja geradas
-  var funcIdx = vtmigIndiceFuncionarios_(); // para recuperar matricula por CPF/nome
+  funcIdx = funcIdx || vtmigIndiceFuncionarios_(); // para recuperar matricula por CPF/nome
 
   var totalLidas = 0, totalIgnoradas = 0, totalMescladas = 0, totalExtras = 0;
   var resumoAbas = []; // uma linha de log por aba, dizendo o que foi lido dela
@@ -521,15 +609,29 @@ function migrarPlanilhaAntigaVT(oldSheetId, unidade, ano) {
       + (semSecaoAba ? ', ' + semSecaoAba + ' fora das secoes ADMINISTRATIVO/PROFESSORES (pulados)' : ''));
   });
 
-  Logger.log('Resumo por aba de "%s":\n%s', oldSs.getName(), resumoAbas.join('\n'));
-
   var totalGeradas = stageRows.ADMINISTRATIVO.length + stageRows.DOCENTE.length;
   if (!totalGeradas) {
     throw new Error('Nenhum lancamento aproveitavel em "' + oldSs.getName() + '" - staging NAO criada. Resumo por aba:\n' + resumoAbas.join('\n'));
   }
 
-  var carimbo = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy HH:mm');
-  var stageSs = SpreadsheetApp.create('VT Migracao - ' + unidade + ' - ' + carimbo);
+  return {
+    stageRows: stageRows, resumoAbas: resumoAbas, nomeArquivo: oldSs.getName(),
+    totalLidas: totalLidas, totalIgnoradas: totalIgnoradas, totalMescladas: totalMescladas, totalExtras: totalExtras
+  };
+}
+
+// Cria a planilha de staging (headers + valores + locale + coluna Mes em
+// texto puro) a partir de {ADMINISTRATIVO, DOCENTE} ja lidos - usado tanto
+// para staging de 1 unidade quanto para a staging em lote. Devolve
+// {id, url, ss}.
+function vtmigCriarStagingSs_(nomeArquivo, stageRows) {
+  var stageSs = SpreadsheetApp.create(nomeArquivo);
+
+  // SpreadsheetApp.create() nasce com o locale padrao da conta (geralmente
+  // en_US, decimal com "."), diferente da planilha oficial do VT (pt_BR,
+  // decimal com ","). Sem isso os valores da staging aparecem com "." mesmo
+  // estando corretos, dificultando a revisao.
+  try { stageSs.setSpreadsheetLocale(SpreadsheetApp.openById(VTMIG_SHEET_ID).getSpreadsheetLocale()); } catch (e) { Logger.log('vtmigCriarStagingSs_ setSpreadsheetLocale: ' + e); }
 
   ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(categoria, idx) {
     var sheet = idx === 0 ? stageSs.getSheets()[0].setName(categoria) : stageSs.insertSheet(categoria);
@@ -539,6 +641,10 @@ function migrarPlanilhaAntigaVT(oldSheetId, unidade, ano) {
       .concat(['Comentário', 'Total Original', 'Diferença', 'Alerta']);
     sheet.appendRow(headers);
     sheet.setFrozenRows(1);
+
+    // Forca texto puro na coluna Mes (B) - sem isso o Sheets reconhece "01
+    // Janeiro" como data de verdade e reformata o mes em minusculo (padrao pt-BR).
+    sheet.getRange('B:B').setNumberFormat('@');
 
     var values = stageRows[categoria].map(function(l) {
       return [l.unidade, l.mes, l.ano, l.matricula, l.cpf, l.nome,
@@ -555,16 +661,29 @@ function migrarPlanilhaAntigaVT(oldSheetId, unidade, ano) {
     sheet.autoResizeColumns(1, headers.length);
   });
 
-  try { stageSs.addEditor(Session.getActiveUser().getEmail()); } catch (e) { Logger.log('migrarPlanilhaAntigaVT addEditor: ' + e); }
+  try { stageSs.addEditor(Session.getActiveUser().getEmail()); } catch (e) { Logger.log('vtmigCriarStagingSs_ addEditor: ' + e); }
+
+  return { id: stageSs.getId(), url: stageSs.getUrl(), ss: stageSs };
+}
+
+// Le 1 planilha antiga e cria 1 planilha de staging so para ela (fluxo
+// gerarStaging()/aplicarStaging(), unidade por unidade).
+function migrarPlanilhaAntigaVT(oldSheetId, unidade, ano) {
+  unidade = vtmigCanonUnidade_(unidade);
+  var lido = vtmigLerPlanilhaAntiga_(oldSheetId, unidade, ano);
+  Logger.log('Resumo por aba de "%s":\n%s', lido.nomeArquivo, lido.resumoAbas.join('\n'));
+
+  var carimbo = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy HH:mm');
+  var staging = vtmigCriarStagingSs_('VT Migracao - ' + unidade + ' - ' + carimbo, lido.stageRows);
 
   // Guarda o ID para aplicarStaging() achar sozinho - sem copiar ID na mao.
-  PropertiesService.getScriptProperties().setProperty(vtmigStagingProp_(unidade, ano), stageSs.getId());
+  PropertiesService.getScriptProperties().setProperty(vtmigStagingProp_(unidade, ano), staging.id);
 
-  Logger.log('Staging criada: %s', stageSs.getUrl());
+  Logger.log('Staging criada: %s', staging.url);
   Logger.log('Linhas lidas: %s | sem matricula (com alerta na staging): %s | mescladas como trecho extra: %s | repetidas que viraram linha extra: %s',
-    totalLidas, totalIgnoradas, totalMescladas, totalExtras);
+    lido.totalLidas, lido.totalIgnoradas, lido.totalMescladas, lido.totalExtras);
 
-  return stageSs.getUrl();
+  return staging.url;
 }
 
 // =============================================================================
