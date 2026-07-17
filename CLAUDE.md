@@ -19,9 +19,10 @@ Repositório: `adrianeca/valetransporte`. Irmão do webapp de VR (`adrianeca/val
 
 ## Modelo de dados
 
-Colunas ADMINISTRATIVO/DOCENTE: `Unidade|Mês|Ano|Matrícula|CPF|Nome|TipoIda|ValorIda|QtdIda|TipoVolta|ValorVolta|QtdVolta|Total|DiasTrabalhados|ValorDiário|ValorJaé|ValorRioCard|TipoIda2|ValorIda2|TipoVolta2|ValorVolta2|TipoIda3|ValorIda3|TipoVolta3|ValorVolta3|EditadoEm|EditadoPor|Comentário|ComentadoEm|ComentadoPor`
+Colunas ADMINISTRATIVO/DOCENTE (ordem lógica, reorganizada antes do lançamento 100% do webapp): `Unidade|Mês|Ano|Matrícula|CPF|Nome` (A-F) → trechos de IDA `TipoIda|ValorIda|QtdIda|TipoIda2|ValorIda2|QtdIda2|TipoIda3|ValorIda3|QtdIda3` (G-O) → trechos de VOLTA idem (P-X) → calculados `Total|DiasTrabalhados|ValorDiário|ValorJaé|ValorRioCard` (Y-AC) → auditoria `EditadoEm|EditadoPor|Comentário|ComentadoEm|ComentadoPor` (AD-AH).
 
-- Até 3 "trechos" por sentido (ida/volta) — ex.: ônibus + metrô no mesmo trajeto. Trechos extras (2º/3º) usam a MESMA Qtd do 1º trecho daquele sentido.
+- Aba criada no layout antigo (TipoIda2 na coluna R): `getOrCreateVTSheet_` **falha com erro pedindo pra rodar `reorganizarColunasVT()`** (run-once no editor, mapeia pelo nome do cabeçalho antigo, idempotente) — nada lê/grava em aba desalinhada. Antes de reordenar, ela cria uma cópia da aba (`ADMINISTRATIVO (backup dd-MM-yyyy HH:mm)`) na própria planilha; apagar manualmente depois de conferir.
+- Até 3 "trechos" por sentido (ida/volta) — ex.: ônibus + metrô no mesmo trajeto. **Cada trecho tem a SUA Qtd**; trecho extra com Qtd em branco/0 **herda a Qtd do 1º trecho do sentido** (no app a Qtd do trecho novo já nasce igual à do 1º, editável; ao salvar grava-se a Qtd efetiva). Dias Trabalhados = maior Qtd entre todos os trechos (os trechos se sobrepõem nos dias — metrô 20 dias + ônibus 19 = 20 dias).
 - Campos calculados (Total, Dias Trabalhados, Valor Diário, Valor Jaé, Valor RioCard) são **sempre recalculados no backend** em `calcularVT_()` ao salvar — nunca confia no que o cliente manda nem em fórmula de planilha.
 - Rateio Jaé/RioCard: `TIPOS_JAE = ['onibus municipal', 'metro']`, `TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']` (comparação normalizada, sem acento).
 - `UNIDADES_SEM_RATEIO = ['VO']` — unidade de São Paulo, sem cartão Jaé/RioCard; só o campo Total vale pra ela (`isSemRateio_()`).
@@ -75,14 +76,19 @@ Regra prática para qualquer script deste projeto:
 
 ## Migração das planilhas antigas (`Migracao_VT.gs`)
 
-Script independente do webapp (não entra no deploy do `Code.gs`/`Index.html`), colado num projeto de Apps Script à parte em script.google.com. Migra as ~20 planilhas antigas por unidade (uma aba por mês, seções ADMINISTRATIVO/PROFESSORES na mesma aba) para a planilha central do VT, em 3 etapas: `migrarBF()` (ou `migrarPlanilhaAntigaVT(id, unidade, ano)`) gera uma planilha de staging para revisão → revisão manual da coluna "Alerta" (CPF suspeito, total divergente, duplicado no mês) → `aplicarStagingVT(stagingSheetId)` grava na planilha oficial pulando chaves que já existam lá. Todos os nomes internos usam prefixo `vtmig`/`VTMIG_` para não colidir com outros scripts; recalcula tudo com cópia do `calcularVT_` (nunca confia nos valores prontos das planilhas antigas); OBS antiga vira Comentário; Bilhete Único é descartado; a 3ª coluna Tipo/Valor/Qtd (formato Jan–Abr) vira Ida 2.
+Script independente do webapp (não entra no deploy do `Code.gs`/`Index.html`), colado num projeto de Apps Script à parte em script.google.com. Migra as ~30 planilhas antigas por unidade (uma aba por mês, seções ADMINISTRATIVO/PROFESSORES na mesma aba) para a planilha central do VT. As planilhas antigas ficam todas numa pasta do Drive (`VTMIG_PASTA_ID`, pasta `1nn4sbeaDl98uatuhpppYNTkLPQ0A4X8s`), nomeadas no padrão `<UNIDADE> - VT - <ano>` — o script acha a planilha da unidade sozinho por esse nome (o ano sai do nome do arquivo). Por unidade, edita-se só `VTMIG_UNIDADE` no bloco CONFIG e roda-se 3 etapas: `gerarStaging()` gera uma planilha de staging para revisão (e guarda o ID dela em Script Properties, por unidade+ano) → revisão manual da coluna "Alerta" (CPF suspeito, total divergente, mesclagens) → `aplicarStaging()` acha a staging sozinho pela property e grava na planilha oficial pulando chaves que já existam lá. `listarPlanilhasDaPasta()` loga as unidades encontradas na pasta. Não se copia função por unidade nem ID na mão (o menu Executar não passa argumentos — por isso os entry points sem parâmetro leem o CONFIG). Todos os nomes internos usam prefixo `vtmig`/`VTMIG_` para não colidir com outros scripts; recalcula tudo com cópia do `calcularVT_` (nunca confia nos valores prontos das planilhas antigas); OBS antiga vira Comentário; Bilhete Único é descartado; a 3ª coluna Tipo/Valor/Qtd (formato Jan–Abr) vira Ida 2.
+
+Algumas unidades (ex.: BG) não preenchiam a coluna Matrícula na planilha antiga — a migração recupera a matrícula pela planilha de funcionários (`VTMIG_FUNC_SHEET_ID`, aba "RJ - UNIDADES"): por CPF (silencioso) ou por nome (com alerta "conferir"; homônimos não casam). Linha que ficar sem matrícula vai pra staging com alerta "SEM MATRICULA" para preenchimento manual — `aplicarStagingVT` não importa linha sem matrícula (lista em "pulados"). `gerarStaging()` loga um resumo por aba (lidos/recuperados/sem matrícula/fora de seção) e dá erro em vez de criar staging vazia.
+
+Nome repetido no mesmo mês (mesma unidade+mês+ano+matrícula) **não vira linha duplicada**: `vtmigMesclarLinha_` encaixa os trechos do lançamento repetido nos slots livres Ida/Volta 2 e 3 da linha já existente (Total/rateio recalculados, Total Original somado, comentários concatenados, alerta "Mesclado..."; se a Qtd divergir entre os lançamentos, alerta — trechos extras usam a Qtd do 1º trecho do sentido). Só quando não cabe (mais de 3 idas ou 3 voltas no mês) fica uma linha extra, com alerta avisando que o webapp edita/exclui apenas a 1ª linha da matrícula no mês; `vtmigUpsertRows_` dá `appendRow` (em vez de sobrescrever) quando a mesma chave se repete no lote.
 
 ## Deploy
 
 1. Copiar `Code.gs` e `Index.html` pro editor do Apps Script do projeto vinculado à planilha `VT_SHEET_ID`.
-2. Publicar nova versão (Implantar > Nova implantação / Gerenciar implantações).
-3. Conferir se `webvt` está nos acessos dos diretores certos na aba SESSOES do Hub.
-4. Rodar `diagnosticoLembretesVT()` pra validar, depois `instalarGatilhosLembreteVT()` uma vez.
+2. Se as abas ainda estiverem no layout antigo de colunas, rodar `reorganizarColunasVT()` uma vez no editor (o app se recusa a rodar sobre aba desalinhada).
+3. Publicar nova versão (Implantar > Nova implantação / Gerenciar implantações).
+4. Conferir se `webvt` está nos acessos dos diretores certos na aba SESSOES do Hub.
+5. Rodar `diagnosticoLembretesVT()` pra validar, depois `instalarGatilhosLembreteVT()` uma vez.
 
 ## Pendências conhecidas
 

@@ -1064,16 +1064,25 @@ function buildExportData() {
 
   var rows = (tab === 'admin' ? state.adminRows : state.docenteRows).filter(passesFilter);
   var header = ['Unidade', 'Mês', 'Ano', 'Matrícula', 'CPF', 'Funcionário',
-    'Tipo Ida 1', 'Valor Ida 1', 'Tipo Ida 2', 'Valor Ida 2', 'Tipo Ida 3', 'Valor Ida 3', 'Qtd Ida',
-    'Tipo Volta 1', 'Valor Volta 1', 'Tipo Volta 2', 'Valor Volta 2', 'Tipo Volta 3', 'Valor Volta 3', 'Qtd Volta',
+    'Tipo Ida 1', 'Valor Ida 1', 'Qtd Ida 1', 'Tipo Ida 2', 'Valor Ida 2', 'Qtd Ida 2', 'Tipo Ida 3', 'Valor Ida 3', 'Qtd Ida 3',
+    'Tipo Volta 1', 'Valor Volta 1', 'Qtd Volta 1', 'Tipo Volta 2', 'Valor Volta 2', 'Qtd Volta 2', 'Tipo Volta 3', 'Valor Volta 3', 'Qtd Volta 3',
     'Total', 'Dias Trab.', 'Valor Diário', 'Valor Jaé', 'Valor RioCard'];
+
+  // Qtd EFETIVA do trecho extra: a própria, senão a herdada do 1º; vazio se o trecho não existe
+  function qtdEfetiva(tipo, qtdPropria, qtdBase) {
+    return tipo ? (Number(qtdPropria) || Number(qtdBase) || 0) : '';
+  }
 
   var data = rows.map(function(r) {
     var semRateio = isSemRateio(r.unidade);
     return [
       r.unidade, MESES[r.mes - 1], r.ano, r.matricula, r.cpf, r.nome,
-      r.tipoIda || '', Number(r.valorIda) || 0, r.tipoIda2 || '', Number(r.valorIda2) || 0, r.tipoIda3 || '', Number(r.valorIda3) || 0, Number(r.qtdIda) || 0,
-      r.tipoVolta || '', Number(r.valorVolta) || 0, r.tipoVolta2 || '', Number(r.valorVolta2) || 0, r.tipoVolta3 || '', Number(r.valorVolta3) || 0, Number(r.qtdVolta) || 0,
+      r.tipoIda || '', Number(r.valorIda) || 0, Number(r.qtdIda) || 0,
+      r.tipoIda2 || '', Number(r.valorIda2) || 0, qtdEfetiva(r.tipoIda2, r.qtdIda2, r.qtdIda),
+      r.tipoIda3 || '', Number(r.valorIda3) || 0, qtdEfetiva(r.tipoIda3, r.qtdIda3, r.qtdIda),
+      r.tipoVolta || '', Number(r.valorVolta) || 0, Number(r.qtdVolta) || 0,
+      r.tipoVolta2 || '', Number(r.valorVolta2) || 0, qtdEfetiva(r.tipoVolta2, r.qtdVolta2, r.qtdVolta),
+      r.tipoVolta3 || '', Number(r.valorVolta3) || 0, qtdEfetiva(r.tipoVolta3, r.qtdVolta3, r.qtdVolta),
       Number(r.total) || 0, Number(r.diasTrabalhados) || 0, Number(r.valorDiario) || 0,
       semRateio ? '' : Number(r.valorJae) || 0, semRateio ? '' : Number(r.valorRiocard) || 0
     ];
@@ -1141,20 +1150,26 @@ function classificarCartao(tipo) {
 }
 
 // Recebe um objeto com os mesmos nomes de campos das linhas do state
-// (tipoIda, valorIda, tipoIda2, valorIda2, tipoIda3, valorIda3, qtdIda, e os equivalentes de volta).
-// Até 3 trechos por sentido; os trechos extras usam a MESMA Qtd do 1º — somam no total, não nos dias.
+// (tipoIda, valorIda, qtdIda, tipoIda2, valorIda2, qtdIda2, ... e os equivalentes de volta).
+// Até 3 trechos por sentido, cada um com a SUA Qtd; trecho extra sem Qtd preenchida
+// herda a Qtd do 1º trecho do sentido (linhas salvas antes dessa mudança).
 function calcularVT(v) {
   var qtdIda   = Number(v.qtdIda)   || 0;
   var qtdVolta = Number(v.qtdVolta) || 0;
 
+  function qtdTrecho(tipo, valor, qtdPropria, qtdBase) {
+    if (!tipo && !(Number(valor) || 0)) return 0; // trecho não usado
+    return Number(qtdPropria) || qtdBase;
+  }
+
   var legs = [
-    { tipo: v.tipoIda,    total: (Number(v.valorIda)    || 0) * qtdIda },
-    { tipo: v.tipoIda2,   total: (Number(v.valorIda2)   || 0) * qtdIda },
-    { tipo: v.tipoIda3,   total: (Number(v.valorIda3)   || 0) * qtdIda },
-    { tipo: v.tipoVolta,  total: (Number(v.valorVolta)  || 0) * qtdVolta },
-    { tipo: v.tipoVolta2, total: (Number(v.valorVolta2) || 0) * qtdVolta },
-    { tipo: v.tipoVolta3, total: (Number(v.valorVolta3) || 0) * qtdVolta }
-  ];
+    { tipo: v.tipoIda,    valor: v.valorIda,    qtd: qtdIda },
+    { tipo: v.tipoIda2,   valor: v.valorIda2,   qtd: qtdTrecho(v.tipoIda2,   v.valorIda2,   v.qtdIda2,   qtdIda) },
+    { tipo: v.tipoIda3,   valor: v.valorIda3,   qtd: qtdTrecho(v.tipoIda3,   v.valorIda3,   v.qtdIda3,   qtdIda) },
+    { tipo: v.tipoVolta,  valor: v.valorVolta,  qtd: qtdVolta },
+    { tipo: v.tipoVolta2, valor: v.valorVolta2, qtd: qtdTrecho(v.tipoVolta2, v.valorVolta2, v.qtdVolta2, qtdVolta) },
+    { tipo: v.tipoVolta3, valor: v.valorVolta3, qtd: qtdTrecho(v.tipoVolta3, v.valorVolta3, v.qtdVolta3, qtdVolta) }
+  ].map(function(l) { return { tipo: l.tipo, qtd: l.qtd, total: (Number(l.valor) || 0) * l.qtd }; });
 
   // Unidades sem rateio (SP): não há cartão Jaé/RioCard — só o Total vale
   var semRateio = isSemRateio(v.unidade);
@@ -1167,9 +1182,9 @@ function calcularVT(v) {
     if (c === 'jae') jae += l.total; else if (c === 'riocard') riocard += l.total;
   });
 
-  // Dias trabalhados = dias do mês (ida e volta acontecem no mesmo dia),
-  // então usa a maior Qtd; o valor diário é o custo do dia completo (ida + volta).
-  var dias = Math.max(qtdIda, qtdVolta);
+  // Dias trabalhados = maior Qtd entre todos os trechos (os trechos se sobrepõem
+  // nos dias); o valor diário é o custo médio do dia completo (ida + volta).
+  var dias = legs.reduce(function(m, l) { return Math.max(m, l.qtd); }, 0);
   return { total: total, dias: dias, valorDiario: dias > 0 ? total / dias : 0, jae: jae, riocard: riocard };
 }
 
@@ -1186,10 +1201,12 @@ function onVTRowInput(el) {
     tipoIda2:   rowValStr(tr, 'vt-tipo-ida2'),   valorIda2:   rowValNum(tr, 'vt-valor-ida2'),
     tipoIda3:   rowValStr(tr, 'vt-tipo-ida3'),   valorIda3:   rowValNum(tr, 'vt-valor-ida3'),
     qtdIda:     rowValNum(tr, 'vt-qtd-ida'),
+    qtdIda2:    rowValNum(tr, 'vt-qtd-ida2'),    qtdIda3:     rowValNum(tr, 'vt-qtd-ida3'),
     tipoVolta:  rowValStr(tr, 'vt-tipo-volta'),  valorVolta:  rowValNum(tr, 'vt-valor-volta'),
     tipoVolta2: rowValStr(tr, 'vt-tipo-volta2'), valorVolta2: rowValNum(tr, 'vt-valor-volta2'),
     tipoVolta3: rowValStr(tr, 'vt-tipo-volta3'), valorVolta3: rowValNum(tr, 'vt-valor-volta3'),
-    qtdVolta:   rowValNum(tr, 'vt-qtd-volta')
+    qtdVolta:   rowValNum(tr, 'vt-qtd-volta'),
+    qtdVolta2:  rowValNum(tr, 'vt-qtd-volta2'),  qtdVolta3:   rowValNum(tr, 'vt-qtd-volta3')
   });
   var semRateio = isSemRateio(unidade);
   tr.querySelector('.vt-total').textContent   = fmtBRL(c.total);
@@ -1256,6 +1273,22 @@ function valorCell(sentido, r, open) {
   return html + '</div></td>';
 }
 
+// Célula de Qtd do sentido: um input por trecho existente, cada trecho com a sua
+// quantidade. Trecho extra sem Qtd própria salva exibe a do 1º trecho (herdada).
+function qtdCell(sentido, r, open) {
+  var isIda = sentido === 'ida';
+  var cls1  = isIda ? 'vt-qtd-ida' : 'vt-qtd-volta';
+  var base  = Number(isIda ? r.qtdIda : r.qtdVolta) || 0;
+  var html  = '<td><div class="leg-stack"><div class="leg-row">' + numInputHtml(cls1, 'vt-qtd', base, open, '1') + '</div>';
+  if (isIda ? r.tipoIda2 : r.tipoVolta2) {
+    html += '<div class="leg-row">' + numInputHtml(cls1 + '2', 'vt-qtd', Number(isIda ? r.qtdIda2 : r.qtdVolta2) || base, open, '1') + '</div>';
+  }
+  if (isIda ? r.tipoIda3 : r.tipoVolta3) {
+    html += '<div class="leg-row">' + numInputHtml(cls1 + '3', 'vt-qtd', Number(isIda ? r.qtdIda3 : r.qtdVolta3) || base, open, '1') + '</div>';
+  }
+  return html + '</div></td>';
+}
+
 function fmtRegistros(n) { return n + (n === 1 ? ' registro' : ' registros'); }
 
 function isSamePeriod(r, target) { return r.mes === target.mes && r.ano === target.ano; }
@@ -1293,10 +1326,10 @@ function renderRows(rows, p, type) {
       '<td>' + esc(r.matricula) + '</td><td>' + esc(r.cpf) + '</td><td>' + esc(r.nome) + editedBadge(r) + '</td>' +
       tipoCell(type, i, 'ida', r, open) +
       valorCell('ida', r, open) +
-      '<td>' + numInputHtml('vt-qtd-ida', 'vt-qtd', r.qtdIda, open, '1') + '</td>' +
+      qtdCell('ida', r, open) +
       tipoCell(type, i, 'volta', r, open) +
       valorCell('volta', r, open) +
-      '<td>' + numInputHtml('vt-qtd-volta', 'vt-qtd', r.qtdVolta, open, '1') + '</td>' +
+      qtdCell('volta', r, open) +
       '<td class="vt-calc vt-total">' + fmtBRL(r.total) + '</td>' +
       '<td class="vt-calc vt-dias">' + (Number(r.diasTrabalhados) || 0) + '</td>' +
       '<td class="vt-calc vt-diario">' + fmtBRL(r.valorDiario) + '</td>' +
@@ -1400,10 +1433,10 @@ function copyFromPreviousMonth(type) {
       matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
       tipoIda: r.tipoIda, valorIda: r.valorIda, qtdIda: r.qtdIda,
       tipoVolta: r.tipoVolta, valorVolta: r.valorVolta, qtdVolta: r.qtdVolta,
-      tipoIda2: r.tipoIda2 || '', valorIda2: r.valorIda2 || 0,
-      tipoVolta2: r.tipoVolta2 || '', valorVolta2: r.valorVolta2 || 0,
-      tipoIda3: r.tipoIda3 || '', valorIda3: r.valorIda3 || 0,
-      tipoVolta3: r.tipoVolta3 || '', valorVolta3: r.valorVolta3 || 0,
+      tipoIda2: r.tipoIda2 || '', valorIda2: r.valorIda2 || 0, qtdIda2: r.qtdIda2 || 0,
+      tipoVolta2: r.tipoVolta2 || '', valorVolta2: r.valorVolta2 || 0, qtdVolta2: r.qtdVolta2 || 0,
+      tipoIda3: r.tipoIda3 || '', valorIda3: r.valorIda3 || 0, qtdIda3: r.qtdIda3 || 0,
+      tipoVolta3: r.tipoVolta3 || '', valorVolta3: r.valorVolta3 || 0, qtdVolta3: r.qtdVolta3 || 0,
       total: r.total, diasTrabalhados: r.diasTrabalhados, valorDiario: r.valorDiario,
       valorJae: r.valorJae, valorRiocard: r.valorRiocard,
       _new: true
@@ -1488,8 +1521,8 @@ function addRow(type) {
     unidade: unidade, mes: target.mes, ano: target.ano, matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
     tipoIda: TIPOS[0], valorIda: 0, qtdIda: 0,
     tipoVolta: TIPOS[0], valorVolta: 0, qtdVolta: 0,
-    tipoIda2: '', valorIda2: 0, tipoVolta2: '', valorVolta2: 0,
-    tipoIda3: '', valorIda3: 0, tipoVolta3: '', valorVolta3: 0,
+    tipoIda2: '', valorIda2: 0, qtdIda2: 0, tipoVolta2: '', valorVolta2: 0, qtdVolta2: 0,
+    tipoIda3: '', valorIda3: 0, qtdIda3: 0, tipoVolta3: '', valorVolta3: 0, qtdVolta3: 0,
     total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0,
     _new: true
   });
@@ -1518,6 +1551,8 @@ function syncDomToState(type) {
     r.tipoIda3    = rowValStr(row, 'vt-tipo-ida3');
     r.valorIda3   = rowValNum(row, 'vt-valor-ida3');
     r.qtdIda      = rowValNum(row, 'vt-qtd-ida');
+    r.qtdIda2     = rowValNum(row, 'vt-qtd-ida2');
+    r.qtdIda3     = rowValNum(row, 'vt-qtd-ida3');
     r.tipoVolta   = rowValStr(row, 'vt-tipo-volta');
     r.valorVolta  = rowValNum(row, 'vt-valor-volta');
     r.tipoVolta2  = rowValStr(row, 'vt-tipo-volta2');
@@ -1525,6 +1560,8 @@ function syncDomToState(type) {
     r.tipoVolta3  = rowValStr(row, 'vt-tipo-volta3');
     r.valorVolta3 = rowValNum(row, 'vt-valor-volta3');
     r.qtdVolta    = rowValNum(row, 'vt-qtd-volta');
+    r.qtdVolta2   = rowValNum(row, 'vt-qtd-volta2');
+    r.qtdVolta3   = rowValNum(row, 'vt-qtd-volta3');
     recalcRow(r);
   });
 }
@@ -1546,17 +1583,19 @@ function rerenderTable(type) {
   if (type === 'admin') renderAdminTable(); else renderDocenteTable();
 }
 
-// Preenche o próximo trecho vago (2º, depois 3º) do sentido
+// Preenche o próximo trecho vago (2º, depois 3º) do sentido.
+// A Qtd do trecho novo já nasce igual à do 1º trecho (caso comum: mesmo trajeto),
+// mas fica editável para quando as quantidades forem diferentes.
 function addLeg(type, idx, sentido) {
   syncDomToState(type); // preserva edições não salvas das outras linhas
   var r = findFilteredRow(type, idx);
   if (!r) return;
   if (sentido === 'ida') {
-    if (!r.tipoIda2) { r.tipoIda2 = TIPOS[0]; r.valorIda2 = 0; }
-    else             { r.tipoIda3 = TIPOS[0]; r.valorIda3 = 0; }
+    if (!r.tipoIda2) { r.tipoIda2 = TIPOS[0]; r.valorIda2 = 0; r.qtdIda2 = Number(r.qtdIda) || 0; }
+    else             { r.tipoIda3 = TIPOS[0]; r.valorIda3 = 0; r.qtdIda3 = Number(r.qtdIda) || 0; }
   } else {
-    if (!r.tipoVolta2) { r.tipoVolta2 = TIPOS[0]; r.valorVolta2 = 0; }
-    else               { r.tipoVolta3 = TIPOS[0]; r.valorVolta3 = 0; }
+    if (!r.tipoVolta2) { r.tipoVolta2 = TIPOS[0]; r.valorVolta2 = 0; r.qtdVolta2 = Number(r.qtdVolta) || 0; }
+    else               { r.tipoVolta3 = TIPOS[0]; r.valorVolta3 = 0; r.qtdVolta3 = Number(r.qtdVolta) || 0; }
   }
   rerenderTable(type);
 }
@@ -1567,11 +1606,11 @@ function removeLeg(type, idx, sentido) {
   var r = findFilteredRow(type, idx);
   if (!r) return;
   if (sentido === 'ida') {
-    if (r.tipoIda3) { r.tipoIda3 = ''; r.valorIda3 = 0; }
-    else            { r.tipoIda2 = ''; r.valorIda2 = 0; }
+    if (r.tipoIda3) { r.tipoIda3 = ''; r.valorIda3 = 0; r.qtdIda3 = 0; }
+    else            { r.tipoIda2 = ''; r.valorIda2 = 0; r.qtdIda2 = 0; }
   } else {
-    if (r.tipoVolta3) { r.tipoVolta3 = ''; r.valorVolta3 = 0; }
-    else              { r.tipoVolta2 = ''; r.valorVolta2 = 0; }
+    if (r.tipoVolta3) { r.tipoVolta3 = ''; r.valorVolta3 = 0; r.qtdVolta3 = 0; }
+    else              { r.tipoVolta2 = ''; r.valorVolta2 = 0; r.qtdVolta2 = 0; }
   }
   recalcRow(r); // o total muda ao remover o trecho
   rerenderTable(type);
@@ -1942,10 +1981,10 @@ function collectEntries(rowsFiltered, rowEls) {
       unidade: r.unidade, matricula: r.matricula, cpf: r.cpf, nome: r.nome, mes: r.mes, ano: r.ano,
       tipoIda:   rowValStr(row, 'vt-tipo-ida'),   valorIda:   rowValNum(row, 'vt-valor-ida'),   qtdIda:   rowValNum(row, 'vt-qtd-ida'),
       tipoVolta: rowValStr(row, 'vt-tipo-volta'), valorVolta: rowValNum(row, 'vt-valor-volta'), qtdVolta: rowValNum(row, 'vt-qtd-volta'),
-      tipoIda2:   rowValStr(row, 'vt-tipo-ida2'),   valorIda2:   rowValNum(row, 'vt-valor-ida2'),
-      tipoVolta2: rowValStr(row, 'vt-tipo-volta2'), valorVolta2: rowValNum(row, 'vt-valor-volta2'),
-      tipoIda3:   rowValStr(row, 'vt-tipo-ida3'),   valorIda3:   rowValNum(row, 'vt-valor-ida3'),
-      tipoVolta3: rowValStr(row, 'vt-tipo-volta3'), valorVolta3: rowValNum(row, 'vt-valor-volta3')
+      tipoIda2:   rowValStr(row, 'vt-tipo-ida2'),   valorIda2:   rowValNum(row, 'vt-valor-ida2'),   qtdIda2:   rowValNum(row, 'vt-qtd-ida2'),
+      tipoVolta2: rowValStr(row, 'vt-tipo-volta2'), valorVolta2: rowValNum(row, 'vt-valor-volta2'), qtdVolta2: rowValNum(row, 'vt-qtd-volta2'),
+      tipoIda3:   rowValStr(row, 'vt-tipo-ida3'),   valorIda3:   rowValNum(row, 'vt-valor-ida3'),   qtdIda3:   rowValNum(row, 'vt-qtd-ida3'),
+      tipoVolta3: rowValStr(row, 'vt-tipo-volta3'), valorVolta3: rowValNum(row, 'vt-valor-volta3'), qtdVolta3: rowValNum(row, 'vt-qtd-volta3')
     });
   });
   return out;

@@ -43,11 +43,14 @@ const TIPOS_JAE     = ['onibus municipal', 'metro'];             // normalizados
 const TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']; // normalizados (sem acento)
 
 // Cabeçalhos das abas da planilha VT (criadas automaticamente se não existirem).
-// As colunas do 2º trecho (R-U) e do 3º trecho (V-Y) ficam no FINAL para não deslocar
-// as colunas das linhas já salvas; os trechos extras usam a mesma Qtd do 1º (quantidade é por sentido).
+// Ordem lógica: identidade (A-F) → trechos de IDA com Tipo/Valor/Qtd de cada um
+// (G-O) → trechos de VOLTA (P-X) → calculados (Y-AC) → auditoria (AD-AH).
+// Qtd de trecho extra em branco herda a Qtd do 1º trecho do sentido.
+// Layout reorganizado antes do lançamento 100% do webapp — se a aba ainda estiver
+// no layout antigo (Tipo Ida 2 na coluna R), rodar reorganizarColunasVT() uma vez.
 const VT_HEADERS = {
-  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por'],
-  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Volta','Valor Volta','Qtd Volta','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Tipo Ida 2','Valor Ida 2','Tipo Volta 2','Valor Volta 2','Tipo Ida 3','Valor Ida 3','Tipo Volta 3','Valor Volta 3','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por']
+  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Ida 2','Valor Ida 2','Qtd Ida 2','Tipo Ida 3','Valor Ida 3','Qtd Ida 3','Tipo Volta','Valor Volta','Qtd Volta','Tipo Volta 2','Valor Volta 2','Qtd Volta 2','Tipo Volta 3','Valor Volta 3','Qtd Volta 3','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por'],
+  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Ida 2','Valor Ida 2','Qtd Ida 2','Tipo Ida 3','Valor Ida 3','Qtd Ida 3','Tipo Volta','Valor Volta','Qtd Volta','Tipo Volta 2','Valor Volta 2','Qtd Volta 2','Tipo Volta 3','Valor Volta 3','Qtd Volta 3','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por']
 };
 
 // Normaliza texto para comparação: minúsculo, sem acento, sem espaços nas bordas
@@ -758,8 +761,13 @@ function getOrCreateVTSheet_(ss, name) {
     sheet.appendRow(VT_HEADERS[name]);
     sheet.setFrozenRows(1);
   } else {
-    // Abas criadas antes dos trechos extras não têm as colunas R-Y — completa os cabeçalhos que faltam
     const headers = VT_HEADERS[name];
+    // Aba ainda no layout antigo (Tipo Ida 2 ficava na coluna R; no novo é a J):
+    // falha na hora, antes que qualquer leitura/gravação embaralhe as colunas.
+    if (sheet.getLastRow() > 0 && String(sheet.getRange(1, 10).getValue()).trim() !== headers[9]) {
+      throw new Error('A aba "' + name + '" está no layout antigo de colunas — rode reorganizarColunasVT() uma vez no editor do Apps Script antes de usar o app.');
+    }
+    // Completa cabeçalhos que faltem no fim (colunas adicionadas em versões novas)
     const lastCol = sheet.getLastColumn();
     if (lastCol > 0 && lastCol < headers.length) {
       sheet.getRange(1, lastCol + 1, 1, headers.length - lastCol)
@@ -767,6 +775,50 @@ function getOrCreateVTSheet_(ss, name) {
     }
   }
   return sheet;
+}
+
+// =============================================================================
+// MIGRAÇÃO DE LAYOUT — rode UMA vez no editor (Executar > reorganizarColunasVT)
+// após publicar a versão com a ordem nova de colunas. Reordena as colunas das
+// abas ADMINISTRATIVO/DOCENTE mapeando pelo NOME do cabeçalho antigo, então
+// funciona tanto para o layout original quanto para o que tinha as Qtd extras
+// penduradas no fim (AE-AH). Idempotente: aba já no layout novo é pulada.
+// =============================================================================
+function reorganizarColunasVT() {
+  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() === 0) { Logger.log('%s: aba inexistente/vazia — nada a fazer', name); return; }
+
+    const data      = sheet.getDataRange().getValues();
+    const oldHeader = data[0].map(function(h) { return String(h).trim(); });
+    const novo      = VT_HEADERS[name];
+
+    if (oldHeader[9] === novo[9]) { Logger.log('%s: já está no layout novo', name); return; }
+
+    // Backup da aba dentro da própria planilha antes de qualquer alteração —
+    // se algo falhar no meio, os dados originais continuam intactos na cópia.
+    const carimbo = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy HH:mm');
+    sheet.copyTo(ss).setName(name + ' (backup ' + carimbo + ')');
+    Logger.log('%s: backup criado na aba "%s (backup %s)"', name, name, carimbo);
+
+    const idx = {};
+    oldHeader.forEach(function(h, i) { if (h && idx[h] === undefined) idx[h] = i; });
+
+    const out = [novo];
+    for (let i = 1; i < data.length; i++) {
+      const r = data[i];
+      out.push(novo.map(function(h) {
+        const j = idx[h];
+        return j === undefined ? '' : r[j]; // coluna que não existia (ex.: Qtd Ida 2) fica em branco e herda no cálculo
+      }));
+    }
+
+    sheet.clearContents();
+    sheet.getRange(1, 1, out.length, novo.length).setValues(out);
+    sheet.setFrozenRows(1);
+    Logger.log('%s: %s linha(s) reorganizadas para o layout novo', name, out.length - 1);
+  });
 }
 
 // =============================================================================
@@ -785,16 +837,24 @@ function calcularVT_(e) {
   const qtdIda   = Number(e.qtdIda)   || 0;
   const qtdVolta = Number(e.qtdVolta) || 0;
 
-  // Até 3 trechos por sentido; os trechos extras usam a MESMA quantidade do 1º
-  // (a Qtd é por sentido), então eles somam no total mas não nos dias.
+  // Até 3 trechos por sentido, cada um com a SUA quantidade. Trecho extra sem
+  // Qtd preenchida herda a Qtd do 1º trecho do sentido (retrocompatível com
+  // linhas salvas antes das colunas Qtd Ida/Volta 2 e 3 existirem).
+  function qtdTrecho(tipo, valor, qtdPropria, qtdBase) {
+    if (!tipo && !(Number(valor) || 0)) return 0; // trecho não usado
+    return Number(qtdPropria) || qtdBase;
+  }
+
   const legs = [
-    { tipo: e.tipoIda,    total: (Number(e.valorIda)    || 0) * qtdIda },
-    { tipo: e.tipoIda2,   total: (Number(e.valorIda2)   || 0) * qtdIda },
-    { tipo: e.tipoIda3,   total: (Number(e.valorIda3)   || 0) * qtdIda },
-    { tipo: e.tipoVolta,  total: (Number(e.valorVolta)  || 0) * qtdVolta },
-    { tipo: e.tipoVolta2, total: (Number(e.valorVolta2) || 0) * qtdVolta },
-    { tipo: e.tipoVolta3, total: (Number(e.valorVolta3) || 0) * qtdVolta }
-  ];
+    { tipo: e.tipoIda,    valor: e.valorIda,    qtd: qtdIda },
+    { tipo: e.tipoIda2,   valor: e.valorIda2,   qtd: qtdTrecho(e.tipoIda2,   e.valorIda2,   e.qtdIda2,   qtdIda) },
+    { tipo: e.tipoIda3,   valor: e.valorIda3,   qtd: qtdTrecho(e.tipoIda3,   e.valorIda3,   e.qtdIda3,   qtdIda) },
+    { tipo: e.tipoVolta,  valor: e.valorVolta,  qtd: qtdVolta },
+    { tipo: e.tipoVolta2, valor: e.valorVolta2, qtd: qtdTrecho(e.tipoVolta2, e.valorVolta2, e.qtdVolta2, qtdVolta) },
+    { tipo: e.tipoVolta3, valor: e.valorVolta3, qtd: qtdTrecho(e.tipoVolta3, e.valorVolta3, e.qtdVolta3, qtdVolta) }
+  ].map(function(l) {
+    return { tipo: l.tipo, qtd: l.qtd, total: (Number(l.valor) || 0) * l.qtd };
+  });
 
   // Unidades sem rateio (SP): não há cartão Jaé/RioCard — só o Total vale
   const semRateio = isSemRateio_(e.unidade);
@@ -808,9 +868,10 @@ function calcularVT_(e) {
     if (cartao === 'riocard') valorRiocard += l.total;
   });
 
-  // Dias trabalhados = dias do mês (ida e volta acontecem no mesmo dia),
-  // então usa a maior Qtd; o valor diário é o custo do dia completo (ida + volta).
-  const dias        = Math.max(qtdIda, qtdVolta);
+  // Dias trabalhados = maior Qtd entre todos os trechos (os trechos se sobrepõem
+  // nos dias — ex.: metrô em 20 dias + ônibus em 19 desses dias = 20 dias);
+  // o valor diário é o custo médio do dia completo (ida + volta).
+  const dias        = legs.reduce(function(m, l) { return Math.max(m, l.qtd); }, 0);
   const valorDiario = dias > 0 ? total / dias : 0;
 
   return { total: total, diasTrabalhados: dias, valorDiario: valorDiario, valorJae: valorJae, valorRiocard: valorRiocard };
@@ -845,16 +906,16 @@ function getVTData(token) {
         unidade: canonUnidade_(r[0]), mes: mes, ano: ano,
         matricula: String(r[3]).trim(), cpf: String(r[4]).trim(), nome: String(r[5]).trim(),
         tipoIda: String(r[6]).trim(), valorIda: r[7] || 0, qtdIda: r[8] || 0,
-        tipoVolta: String(r[9]).trim(), valorVolta: r[10] || 0, qtdVolta: r[11] || 0,
-        total: r[12] || 0, diasTrabalhados: r[13] || 0, valorDiario: r[14] || 0,
-        valorJae: r[15] || 0, valorRiocard: r[16] || 0,
-        tipoIda2: String(r[17] || '').trim(), valorIda2: r[18] || 0,
-        tipoVolta2: String(r[19] || '').trim(), valorVolta2: r[20] || 0,
-        tipoIda3: String(r[21] || '').trim(), valorIda3: r[22] || 0,
-        tipoVolta3: String(r[23] || '').trim(), valorVolta3: r[24] || 0,
-        editadoEm: fmtDataHora_(r[25]), editadoPor: String(r[26] || '').trim(),
-        comentario: String(r[27] || '').trim(),
-        comentadoEm: fmtDataHora_(r[28]), comentadoPor: String(r[29] || '').trim()
+        tipoIda2: String(r[9] || '').trim(), valorIda2: r[10] || 0, qtdIda2: r[11] || 0,
+        tipoIda3: String(r[12] || '').trim(), valorIda3: r[13] || 0, qtdIda3: r[14] || 0,
+        tipoVolta: String(r[15]).trim(), valorVolta: r[16] || 0, qtdVolta: r[17] || 0,
+        tipoVolta2: String(r[18] || '').trim(), valorVolta2: r[19] || 0, qtdVolta2: r[20] || 0,
+        tipoVolta3: String(r[21] || '').trim(), valorVolta3: r[22] || 0, qtdVolta3: r[23] || 0,
+        total: r[24] || 0, diasTrabalhados: r[25] || 0, valorDiario: r[26] || 0,
+        valorJae: r[27] || 0, valorRiocard: r[28] || 0,
+        editadoEm: fmtDataHora_(r[29]), editadoPor: String(r[30] || '').trim(),
+        comentario: String(r[31] || '').trim(),
+        comentadoEm: fmtDataHora_(r[32]), comentadoPor: String(r[33] || '').trim()
       });
     }
 
@@ -893,17 +954,24 @@ function saveVTData(payload) {
     .map(function(e) { e.unidade = canonUnidade_(e.unidade); return e; })
     .filter(function(e) { return isUserAllowedUnit_(user, e.unidade); });
 
-  // Ordem espelha as colunas G-Y da aba: trecho 1 (G-L), calculados (M-Q), trecho 2 (R-U), trecho 3 (V-Y)
+  // Ordem espelha as colunas G-AC da aba: trechos de ida (G-O), trechos de volta
+  // (P-X), calculados (Y-AC). Grava a Qtd EFETIVA de trecho extra: sem Qtd
+  // digitada herda a do 1º trecho do sentido; trecho não usado fica 0.
+  function qtdEfetiva_(tipo, valor, qtdPropria, qtdBase) {
+    if (!tipo && !(Number(valor) || 0)) return 0;
+    return Number(qtdPropria) || Number(qtdBase) || 0;
+  }
+
   function valuesFn(e) {
     const calc = calcularVT_(e);
     return [
       e.tipoIda || '', Number(e.valorIda) || 0, Number(e.qtdIda) || 0,
+      e.tipoIda2 || '', Number(e.valorIda2) || 0, qtdEfetiva_(e.tipoIda2, e.valorIda2, e.qtdIda2, e.qtdIda),
+      e.tipoIda3 || '', Number(e.valorIda3) || 0, qtdEfetiva_(e.tipoIda3, e.valorIda3, e.qtdIda3, e.qtdIda),
       e.tipoVolta || '', Number(e.valorVolta) || 0, Number(e.qtdVolta) || 0,
-      calc.total, calc.diasTrabalhados, calc.valorDiario, calc.valorJae, calc.valorRiocard,
-      e.tipoIda2 || '', Number(e.valorIda2) || 0,
-      e.tipoVolta2 || '', Number(e.valorVolta2) || 0,
-      e.tipoIda3 || '', Number(e.valorIda3) || 0,
-      e.tipoVolta3 || '', Number(e.valorVolta3) || 0
+      e.tipoVolta2 || '', Number(e.valorVolta2) || 0, qtdEfetiva_(e.tipoVolta2, e.valorVolta2, e.qtdVolta2, e.qtdVolta),
+      e.tipoVolta3 || '', Number(e.valorVolta3) || 0, qtdEfetiva_(e.tipoVolta3, e.valorVolta3, e.qtdVolta3, e.qtdVolta),
+      calc.total, calc.diasTrabalhados, calc.valorDiario, calc.valorJae, calc.valorRiocard
     ];
   }
 
@@ -966,7 +1034,7 @@ function _valMudou_(antigo, novo) {
 // Atualiza a linha existente (unidade+mes+ano+matricula) ou cria uma nova, para cada item.
 // Identidade (Unidade..CPF..Nome) ocupa as colunas A-F; os valores calculados começam na G.
 // Quando um valor já lançado é alterado, grava quem editou e quando nas duas colunas
-// após os valores (Z/AA — cabeçalhos garantidos por getOrCreateVTSheet_/VT_HEADERS).
+// após os valores (AD/AE — cabeçalhos garantidos por getOrCreateVTSheet_/VT_HEADERS).
 function _upsertRows_(sheet, entries, valuesFn, editorEmail) {
   if (!entries || !entries.length) return;
 
@@ -1019,13 +1087,15 @@ function recalcularTudo() {
       const calc = calcularVT_({
         unidade: r[0],
         tipoIda: r[6], valorIda: r[7], qtdIda: r[8],
-        tipoVolta: r[9], valorVolta: r[10], qtdVolta: r[11],
-        tipoIda2: r[17], valorIda2: r[18], tipoVolta2: r[19], valorVolta2: r[20],
-        tipoIda3: r[21], valorIda3: r[22], tipoVolta3: r[23], valorVolta3: r[24]
+        tipoIda2: r[9], valorIda2: r[10], qtdIda2: r[11],
+        tipoIda3: r[12], valorIda3: r[13], qtdIda3: r[14],
+        tipoVolta: r[15], valorVolta: r[16], qtdVolta: r[17],
+        tipoVolta2: r[18], valorVolta2: r[19], qtdVolta2: r[20],
+        tipoVolta3: r[21], valorVolta3: r[22], qtdVolta3: r[23]
       });
       out.push([calc.total, calc.diasTrabalhados, calc.valorDiario, calc.valorJae, calc.valorRiocard]);
     }
-    sheet.getRange(2, 13, out.length, 5).setValues(out); // colunas M-Q (calculadas)
+    sheet.getRange(2, 25, out.length, 5).setValues(out); // colunas Y-AC (calculadas)
   });
 }
 
