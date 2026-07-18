@@ -1099,6 +1099,87 @@ function recalcularTudo() {
   });
 }
 
+// Índices (0-based) das 6 colunas de Qtd — Ida/Ida2/Ida3/Volta/Volta2/Volta3
+const QTD_COLS_ = [8, 11, 14, 17, 20, 23];
+
+// Compara os valores calculados (Total/Dias/Valor Diário/Jaé/RioCard) com o que
+// está gravado em cada linha, SEM sobrescrever nada — só loga divergências pra
+// conferir antes de decidir rodar recalcularTudo(). Rode no editor (Ctrl+Enter).
+function diagnosticoRecalculoVT() {
+  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
+  let divergencias = 0;
+
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(name) {
+    const sheet = getOrCreateVTSheet_(ss, name);
+    const rows  = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const calc = calcularVT_({
+        unidade: r[0],
+        tipoIda: r[6], valorIda: r[7], qtdIda: r[8],
+        tipoIda2: r[9], valorIda2: r[10], qtdIda2: r[11],
+        tipoIda3: r[12], valorIda3: r[13], qtdIda3: r[14],
+        tipoVolta: r[15], valorVolta: r[16], qtdVolta: r[17],
+        tipoVolta2: r[18], valorVolta2: r[19], qtdVolta2: r[20],
+        tipoVolta3: r[21], valorVolta3: r[22], qtdVolta3: r[23]
+      });
+
+      const campos = [
+        ['Total', r[24], calc.total],
+        ['Dias Trabalhados', r[25], calc.diasTrabalhados],
+        ['Valor Diário', r[26], calc.valorDiario],
+        ['Valor Jaé', r[27], calc.valorJae],
+        ['Valor RioCard', r[28], calc.valorRiocard]
+      ];
+
+      campos.forEach(function(c) {
+        const atual = Number(c[1]) || 0, esperado = Number(c[2]) || 0;
+        if (Math.abs(atual - esperado) > 0.01) {
+          divergencias++;
+          Logger.log('%s linha %s (unidade=%s mat=%s mes=%s/%s): %s gravado=%s esperado=%s',
+            name, i + 2, r[0], r[3], r[1], r[2], c[0], atual, esperado);
+        }
+      });
+    }
+  });
+
+  Logger.log('\n=== TOTAL: %s divergência(s) encontrada(s) ===', divergencias);
+  Logger.log(divergencias
+    ? 'Confira os casos acima; se estiverem certos, rode recalcularTudo() para gravar os valores corretos.'
+    : 'Nenhuma divergência — todos os somatórios batem com a fórmula vigente.');
+}
+
+// =============================================================================
+// LIMPEZA — remove lançamentos com todas as Qtd (Ida/Ida2/Ida3/Volta/Volta2/Volta3)
+// zeradas ou em branco: são linhas sem nenhum trecho de fato preenchido. Rode
+// manualmente no editor (Ctrl+Enter) e confira o log antes de aceitar o resultado.
+// =============================================================================
+
+function apagarLinhasZeradasVT() {
+  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
+  let totalApagadas = 0;
+
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(name) {
+    const sheet = getOrCreateVTSheet_(ss, name);
+    const rows  = sheet.getDataRange().getValues();
+
+    // De baixo pra cima, pra deleteRow não bagunçar os índices das linhas seguintes
+    for (let i = rows.length - 1; i >= 1; i--) {
+      const r = rows[i];
+      const todasZeradas = QTD_COLS_.every(function(c) { return !(Number(r[c]) || 0); });
+      if (todasZeradas) {
+        Logger.log('%s linha %s apagada: unidade=%s mat=%s nome=%s mes=%s/%s',
+          name, i + 2, r[0], r[3], r[5], r[1], r[2]);
+        sheet.deleteRow(i + 1);
+        totalApagadas++;
+      }
+    }
+  });
+
+  Logger.log('\n=== TOTAL: %s linha(s) apagada(s) ===', totalApagadas);
+}
+
 // =============================================================================
 // EXCLUSÃO DE LANÇAMENTO — remove a linha (unidade+mes+ano+matricula) da aba.
 // Só permite excluir lançamentos do período vigente (Previsto).
