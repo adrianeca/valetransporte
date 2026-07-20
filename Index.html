@@ -328,6 +328,9 @@ input[type=number]:disabled {
   vertical-align:1px;cursor:default;white-space:nowrap;
 }
 
+/* Asterisco no campo específico alterado numa liberação concedida após o dia 11 */
+.lib-star {color:#dc2626;font-weight:800;cursor:default;margin-left:2px}
+
 .entry-table td {padding:6px 6px}
 .entry-table select.vt-tipo-sel {
   min-width:132px;max-width:170px;padding:5px 6px;
@@ -1301,7 +1304,7 @@ function tipoCell(type, i, sentido, r, open) {
   for (var n = 1; n <= nLegs; n++) {
     var cls  = n === 1 ? cls1 : cls1 + n;
     var last = n === nLegs;
-    html += '<div class="leg-row">' + tipoSelectHtml(cls, tipos[n - 1], open);
+    html += '<div class="leg-row">' + tipoSelectHtml(cls, tipos[n - 1], open) + libStar(r, campoLegKey('tipo', isIda, n));
     if (open && last && n > 1) {
       html += '<button type="button" class="leg-del-btn" title="Remover ' + n + 'º meio de transporte" onclick="removeLeg(\'' + type + '\',' + i + ',\'' + sentido + '\')">×</button>';
     }
@@ -1314,20 +1317,20 @@ function tipoCell(type, i, sentido, r, open) {
 }
 
 // Célula de Valor do sentido: um input por trecho existente, com prefixo R$
-function moneyInputHtml(cls, val, editable) {
+function moneyInputHtml(cls, val, editable, suffix) {
   return '<div class="leg-row"><span class="money-prefix">R$</span>' +
-    numInputHtml(cls, 'vt-valor', val, editable, '0.01') + '</div>';
+    numInputHtml(cls, 'vt-valor', val, editable, '0.01') + (suffix || '') + '</div>';
 }
 
 function valorCell(sentido, r, open) {
   var isIda = sentido === 'ida';
   var cls1  = isIda ? 'vt-valor-ida' : 'vt-valor-volta';
-  var html  = '<td><div class="leg-stack">' + moneyInputHtml(cls1, isIda ? r.valorIda : r.valorVolta, open);
+  var html  = '<td><div class="leg-stack">' + moneyInputHtml(cls1, isIda ? r.valorIda : r.valorVolta, open, libStar(r, campoLegKey('valor', isIda, 1)));
   if (isIda ? r.tipoIda2 : r.tipoVolta2) {
-    html += moneyInputHtml(cls1 + '2', isIda ? r.valorIda2 : r.valorVolta2, open);
+    html += moneyInputHtml(cls1 + '2', isIda ? r.valorIda2 : r.valorVolta2, open, libStar(r, campoLegKey('valor', isIda, 2)));
   }
   if (isIda ? r.tipoIda3 : r.tipoVolta3) {
-    html += moneyInputHtml(cls1 + '3', isIda ? r.valorIda3 : r.valorVolta3, open);
+    html += moneyInputHtml(cls1 + '3', isIda ? r.valorIda3 : r.valorVolta3, open, libStar(r, campoLegKey('valor', isIda, 3)));
   }
   return html + '</div></td>';
 }
@@ -1338,12 +1341,12 @@ function qtdCell(sentido, r, open) {
   var isIda = sentido === 'ida';
   var cls1  = isIda ? 'vt-qtd-ida' : 'vt-qtd-volta';
   var base  = Number(isIda ? r.qtdIda : r.qtdVolta) || 0;
-  var html  = '<td><div class="leg-stack"><div class="leg-row">' + numInputHtml(cls1, 'vt-qtd', base, open, '1') + '</div>';
+  var html  = '<td><div class="leg-stack"><div class="leg-row">' + numInputHtml(cls1, 'vt-qtd', base, open, '1') + libStar(r, campoLegKey('qtd', isIda, 1)) + '</div>';
   if (isIda ? r.tipoIda2 : r.tipoVolta2) {
-    html += '<div class="leg-row">' + numInputHtml(cls1 + '2', 'vt-qtd', Number(isIda ? r.qtdIda2 : r.qtdVolta2) || base, open, '1') + '</div>';
+    html += '<div class="leg-row">' + numInputHtml(cls1 + '2', 'vt-qtd', Number(isIda ? r.qtdIda2 : r.qtdVolta2) || base, open, '1') + libStar(r, campoLegKey('qtd', isIda, 2)) + '</div>';
   }
   if (isIda ? r.tipoIda3 : r.tipoVolta3) {
-    html += '<div class="leg-row">' + numInputHtml(cls1 + '3', 'vt-qtd', Number(isIda ? r.qtdIda3 : r.qtdVolta3) || base, open, '1') + '</div>';
+    html += '<div class="leg-row">' + numInputHtml(cls1 + '3', 'vt-qtd', Number(isIda ? r.qtdIda3 : r.qtdVolta3) || base, open, '1') + libStar(r, campoLegKey('qtd', isIda, 3)) + '</div>';
   }
   return html + '</div></td>';
 }
@@ -1361,6 +1364,19 @@ function editedRowAttr(r) {
 function editedBadge(r) {
   if (!r.editadoEm) return '';
   return ' <span class="edited-badge" title="Editado por ' + esc(r.editadoPor) + ' em ' + esc(r.editadoEm) + '">&#9998; editado</span>';
+}
+
+// Chave do campo (ex.: "valorIda2") e selo de asterisco pra campos que só puderam ser
+// alterados por causa de uma liberação temporária concedida após o dia 11 — o selo some
+// na próxima edição normal dentro do prazo (backend limpa a coluna nesse caso).
+function campoLegKey(prefixo, isIda, n) {
+  return prefixo + (isIda ? 'Ida' : 'Volta') + (n > 1 ? n : '');
+}
+
+function libStar(r, key) {
+  var lista = r.camposEditadosLiberacao;
+  if (!lista || (',' + lista + ',').indexOf(',' + key + ',') === -1) return '';
+  return ' <span class="lib-star" title="Alterado via liberação concedida após o dia 11">*</span>';
 }
 
 function commentCell(r, type, i) {

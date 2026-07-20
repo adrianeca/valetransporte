@@ -27,6 +27,7 @@ Colunas ADMINISTRATIVO/DOCENTE (ordem lógica, reorganizada antes do lançamento
 - Rateio Jaé/RioCard: `TIPOS_JAE = ['onibus municipal', 'metro']`, `TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']` (comparação normalizada, sem acento).
 - `UNIDADES_SEM_RATEIO = ['VO']` — unidade de São Paulo, sem cartão Jaé/RioCard; só o campo Total vale pra ela (`isSemRateio_()`).
 - Edição sinalizada: colunas `Editado Em`/`Editado Por` gravadas só quando um valor **já lançado** (≠ 0) muda — preencher campo zerado é lançamento normal, não edição. Linha marcada em âmbar na UI com selo "✎ editado".
+- Edição feita durante uma **liberação concedida após o dia 11** (fora do prazo normal) grava adicionalmente, campo a campo, quais trechos mudaram na coluna `Campos Editados (Liberação)` (última coluna, AI — acrescentada no fim das abas de propósito, pois `getOrCreateVTSheet_` só completa cabeçalho novo no final, nunca no meio). No front-end isso vira um `*` vermelho ao lado do input específico alterado (`libStar()`/`campoLegKey()` em Index.html), não no selo âmbar da linha inteira. Uma edição normal subsequente dentro do prazo limpa essa coluna — o `*` reflete só a alteração mais recente feita via liberação, nunca fica marcado pra sempre.
 - As 3 colunas finais (`Comentário`/`Comentado Em`/`Comentado Por`) fazem parte de `VT_HEADERS` — `getOrCreateVTSheet_()` já garante esse cabeçalho automaticamente, inclusive em abas criadas antes dessa mudança (mesmo mecanismo que já estende o cabeçalho pros trechos extras).
 
 ## Comentários por lançamento

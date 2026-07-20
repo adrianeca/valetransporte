@@ -44,14 +44,24 @@ const TIPOS_RIOCARD = ['onibus intermunicipal', 'barca', 'trem']; // normalizado
 
 // Cabeçalhos das abas da planilha VT (criadas automaticamente se não existirem).
 // Ordem lógica: identidade (A-F) → trechos de IDA com Tipo/Valor/Qtd de cada um
-// (G-O) → trechos de VOLTA (P-X) → calculados (Y-AC) → auditoria (AD-AH).
-// Qtd de trecho extra em branco herda a Qtd do 1º trecho do sentido.
+// (G-O) → trechos de VOLTA (P-X) → calculados (Y-AC) → auditoria (AD-AH) →
+// campos alterados via liberação pós-dia-11 (AI). Qtd de trecho extra em branco
+// herda a Qtd do 1º trecho do sentido. Coluna nova sempre no FIM: getOrCreateVTSheet_
+// só sabe completar cabeçalho que falta no final, nunca no meio.
 // Layout reorganizado antes do lançamento 100% do webapp — se a aba ainda estiver
 // no layout antigo (Tipo Ida 2 na coluna R), rodar reorganizarColunasVT() uma vez.
 const VT_HEADERS = {
-  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Ida 2','Valor Ida 2','Qtd Ida 2','Tipo Ida 3','Valor Ida 3','Qtd Ida 3','Tipo Volta','Valor Volta','Qtd Volta','Tipo Volta 2','Valor Volta 2','Qtd Volta 2','Tipo Volta 3','Valor Volta 3','Qtd Volta 3','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por'],
-  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Ida 2','Valor Ida 2','Qtd Ida 2','Tipo Ida 3','Valor Ida 3','Qtd Ida 3','Tipo Volta','Valor Volta','Qtd Volta','Tipo Volta 2','Valor Volta 2','Qtd Volta 2','Tipo Volta 3','Valor Volta 3','Qtd Volta 3','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por']
+  ADMINISTRATIVO: ['Unidade','Mês','Ano','Matrícula','CPF','Administrativo','Tipo Ida','Valor Ida','Qtd Ida','Tipo Ida 2','Valor Ida 2','Qtd Ida 2','Tipo Ida 3','Valor Ida 3','Qtd Ida 3','Tipo Volta','Valor Volta','Qtd Volta','Tipo Volta 2','Valor Volta 2','Qtd Volta 2','Tipo Volta 3','Valor Volta 3','Qtd Volta 3','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por','Campos Editados (Liberação)'],
+  DOCENTE:        ['Unidade','Mês','Ano','Matrícula','CPF','Docente','Tipo Ida','Valor Ida','Qtd Ida','Tipo Ida 2','Valor Ida 2','Qtd Ida 2','Tipo Ida 3','Valor Ida 3','Qtd Ida 3','Tipo Volta','Valor Volta','Qtd Volta','Tipo Volta 2','Valor Volta 2','Qtd Volta 2','Tipo Volta 3','Valor Volta 3','Qtd Volta 3','Total','Dias Trabalhados','Valor Diário','Valor Total Jaé','Valor Total RioCard','Editado Em','Editado Por','Comentário','Comentado Em','Comentado Por','Campos Editados (Liberação)']
 };
+
+// Ordem espelha os 18 primeiros valores retornados por valuesFn() em saveVTData
+// (trechos de ida e volta, sem os calculados) — usado para registrar quais campos
+// específicos mudaram numa edição feita durante uma liberação concedida após o dia 11.
+const VT_CAMPOS_TRECHO_ = [
+  'tipoIda','valorIda','qtdIda','tipoIda2','valorIda2','qtdIda2','tipoIda3','valorIda3','qtdIda3',
+  'tipoVolta','valorVolta','qtdVolta','tipoVolta2','valorVolta2','qtdVolta2','tipoVolta3','valorVolta3','qtdVolta3'
+];
 
 // Normaliza texto para comparação: minúsculo, sem acento, sem espaços nas bordas
 function norm_(s) {
@@ -915,7 +925,8 @@ function getVTData(token) {
         valorJae: r[27] || 0, valorRiocard: r[28] || 0,
         editadoEm: fmtDataHora_(r[29]), editadoPor: String(r[30] || '').trim(),
         comentario: String(r[31] || '').trim(),
-        comentadoEm: fmtDataHora_(r[32]), comentadoPor: String(r[33] || '').trim()
+        comentadoEm: fmtDataHora_(r[32]), comentadoPor: String(r[33] || '').trim(),
+        camposEditadosLiberacao: String(r[34] || '').trim()
       });
     }
 
@@ -940,6 +951,11 @@ function saveVTData(payload) {
 
   const user = getSessionUser_(payload.token);
   if (!user) throw new Error('Sessão inválida ou expirada. Acesse novamente pelo Hub.');
+
+  // Salvamento só está acontecendo porque uma liberação temporária destravou o
+  // período (já vencido no dia 11) — usado para marcar, campo a campo, o que foi
+  // alterado fora do prazo normal.
+  const forcedByLiberacao = new Date().getDate() > 11 && hasActiveLiberacao_(user.email);
 
   const ss           = SpreadsheetApp.openById(VT_SHEET_ID);
   const adminSheet   = getOrCreateVTSheet_(ss, 'ADMINISTRATIVO');
@@ -975,8 +991,8 @@ function saveVTData(payload) {
     ];
   }
 
-  _upsertRows_(adminSheet, adminEntries, valuesFn, user.email);
-  _upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email);
+  _upsertRows_(adminSheet, adminEntries, valuesFn, user.email, forcedByLiberacao);
+  _upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email, forcedByLiberacao);
 
   return { success: true };
 }
@@ -1035,8 +1051,13 @@ function _valMudou_(antigo, novo) {
 // Identidade (Unidade..CPF..Nome) ocupa as colunas A-F; os valores calculados começam na G.
 // Quando um valor já lançado é alterado, grava quem editou e quando nas duas colunas
 // após os valores (AD/AE — cabeçalhos garantidos por getOrCreateVTSheet_/VT_HEADERS).
-function _upsertRows_(sheet, entries, valuesFn, editorEmail) {
+// Se a edição só foi possível por uma liberação concedida após o dia 11, grava também
+// quais campos específicos de trecho mudaram (coluna "Campos Editados (Liberação)"),
+// pra sinalizar com asterisco no front-end; edição normal dentro do prazo limpa essa coluna.
+function _upsertRows_(sheet, entries, valuesFn, editorEmail, forcedByLiberacao) {
   if (!entries || !entries.length) return;
+
+  const camposCol1 = VT_HEADERS[sheet.getName()].indexOf('Campos Editados (Liberação)') + 1;
 
   const allRows = sheet.getDataRange().getValues();
   const map = {};
@@ -1058,6 +1079,12 @@ function _upsertRows_(sheet, entries, valuesFn, editorEmail) {
         const editou  = values.some(function(v, j) { return _valMudou_(oldVals[j], v); });
         if (editou) {
           sheet.getRange(rowIdx, 7 + values.length, 1, 2).setValues([[new Date(), editorEmail || '']]);
+          if (camposCol1) {
+            const camposAlterados = forcedByLiberacao
+              ? VT_CAMPOS_TRECHO_.filter(function(campo, j) { return _valMudou_(oldVals[j], values[j]); }).join(',')
+              : '';
+            sheet.getRange(rowIdx, camposCol1).setValue(camposAlterados);
+          }
         }
       }
       sheet.getRange(rowIdx, 7, 1, values.length).setValues([values]);
