@@ -540,6 +540,7 @@ input[type=number]:disabled {
         <div class="filter-actions">
           <button type="button" class="export-csv-btn" onclick="exportCSV()">&#8681; Exportar CSV</button>
           <button type="button" class="export-csv-btn" id="exportSheetBtn" onclick="exportToSheet()">&#9638; Planilha Google</button>
+          <button type="button" class="export-csv-btn" id="exportJaeBtn" style="display:none" onclick="exportJae()">&#8681; Exportar Jaé</button>
           <button type="button" class="clear-filters-btn" onclick="clearFilters()">Limpar filtros</button>
         </div>
       </div>
@@ -784,6 +785,22 @@ function normStr(s) {
   return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+// CNPJ de cada unidade (empresa), usado no modelo de importação do Jaé.
+// Chaves já no código canônico (ex.: "mr" p/ Méier, "ch" p/ Cachambi — ver UNIDADE_ALIASES_ no Code.gs).
+var UNIDADE_CNPJ = {
+  bf: '07.643.896/0001-76', bg: '55.330.784/0001-08', bod: '65.789.750/0001-30',
+  cg: '23.149.208/0001-72', cp: '30.507.545/0001-50', cx: '07.657.195/0001-96',
+  dt: '10.576.883/0001-36', 'ec new': '23.875.012/0001-65',
+  ed: '42.163.550/0001-71', editora: '42.163.550/0001-71', // sigla usada na planilha pode ser "ED" ou "EDITORA"
+  fg: '33.579.506/0001-56', gr: '65.768.114/0001-21', ig: '07.644.726/0001-06',
+  ip: '07.826.615/0001-10', it: '07.659.358/0001-70', lj: '14.805.058/0001-17',
+  online: '27.618.651/0001-04', mr: '07.642.399/0001-53', ni: '07.717.815/0001-35',
+  nl: '32.102.956/0001-90', ch: '17.211.797/0001-79', nt: '07.659.399/0001-66',
+  pc: '33.579.506/0002-37', pn: '63.339.978/0001-00', po: '28.535.846/0001-45',
+  rc: '21.470.581/0001-03', tj: '07.642.417/0001-05', tq: '33.579.360/0001-49',
+  vo: '12.127.235/0001-28', vp: '07.642.688/0001-52', vq: '08.432.982/0001-00'
+};
+
 // ── Responsáveis do DP por empresa: as listadas são da Jessica; todas as demais, da Priscila ──
 var RESPONSAVEIS = ['Jessica', 'Priscila'];
 var EMPRESAS_JESSICA = ['metodos', 'bod', 'gr', 'nt', 'vp', 'vo', 'nl', 'mr', 'tj', 'cg',
@@ -892,6 +909,7 @@ function renderUI() {
 function renderFilterBar() {
   var wrap     = document.getElementById('unitFilterWrap');
   var respWrap = document.getElementById('respFilterWrap');
+  document.getElementById('exportJaeBtn').style.display = state.availableUnits.length > 1 ? '' : 'none';
   if (state.availableUnits.length > 1) {
     wrap.style.display = '';
     renderMultiselectPanel('unitFilterPanel', state.availableUnits.map(function(un) { return { value: un, label: un }; }), state.unitFilter, 'onUnitFilterCheck');
@@ -1100,6 +1118,47 @@ function exportCSV() {
   ex.rows.forEach(function(row) { lines.push(row.map(csvEscape).join(',')); });
 
   downloadCsv('vt_' + ex.tab + '_' + new Date().toISOString().slice(0, 10) + '.csv', lines);
+}
+
+// ── EXPORTAÇÃO MODELO JAÉ (CNPJ da unidade + cpf/nome/Valor Jaé, respeita a aba ativa) ──
+// Layout fixo pedido pela Adriane: A1 CNPJ, B1 "10", D1 "B", A2 "v1", A3 cabeçalho cpf/nome/valor.
+// "10" e "B" são fixos nessa v1 (não variam por unidade/lançamento).
+
+function buildJaeExportData() {
+  var tab = activeTab();
+  if (tab !== 'admin' && tab !== 'docente') return { error: 'Selecione a aba Administrativo ou Docente para exportar.' };
+
+  var units = visibleUnits();
+  if (units.length !== 1) return { error: 'Filtre exatamente uma unidade para exportar o modelo Jaé.' };
+  var unidade = units[0];
+
+  if (isSemRateio(unidade)) return { error: unidade + ' não tem rateio Jaé/RioCard — nada a exportar.' };
+
+  var cnpj = UNIDADE_CNPJ[normStr(unidade)];
+  if (!cnpj) return { error: 'CNPJ não cadastrado para a unidade ' + unidade + '.' };
+
+  var rows = (tab === 'admin' ? state.adminRows : state.docenteRows)
+    .filter(passesFilter)
+    .filter(function(r) { return Number(r.valorJae) > 0; })
+    .map(function(r) { return [r.cpf, r.nome, Number(r.valorJae)]; });
+
+  if (!rows.length) return { error: 'Nenhum colaborador com Valor Jaé para exportar com os filtros atuais.' };
+
+  return { tab: tab, cnpj: cnpj, rows: rows };
+}
+
+function exportJae() {
+  var ex = buildJaeExportData();
+  if (ex.error) { alert(ex.error); return; }
+
+  var lines = [
+    [ex.cnpj, '10', '', 'B'].map(csvEscape).join(','),
+    'v1',
+    ['cpf', 'nome', 'valor'].map(csvEscape).join(',')
+  ];
+  ex.rows.forEach(function(row) { lines.push(row.map(csvEscape).join(',')); });
+
+  downloadCsv('vt_jae_' + ex.tab + '_' + new Date().toISOString().slice(0, 10) + '.csv', lines);
 }
 
 function exportToSheet() {
