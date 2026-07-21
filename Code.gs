@@ -19,6 +19,22 @@ const MOTIVOS_LIBERACAO = [
   'Outro'
 ];
 
+// E-mails que nunca sofrem o bloqueio automático do dia 12 (edição sempre liberada
+// pra eles, sem precisar de liberação temporária nem solicitação ao DP).
+const EMAILS_SEM_BLOQUEIO = [
+  'dp.ec@brasas.com',
+  'adriane@brasas.com',
+  'priscila.soares@brasas.com',
+  'bianca_dp@brasas.com',
+  'bruno@brasas.com'
+];
+
+function isSemBloqueio_(email) {
+  if (!email) return false;
+  const emailNorm = norm_(email);
+  return EMAILS_SEM_BLOQUEIO.some(function(e) { return norm_(e) === emailNorm; });
+}
+
 // Unidades de SP (hoje só VO) não têm cartões Jaé/RioCard: usam os mesmos tipos de
 // transporte do RJ, mas sem rateio — o valor final a pagar é a coluna Total.
 const UNIDADES_SEM_RATEIO = ['VO'];
@@ -248,10 +264,11 @@ function getCurrentPeriod(token) {
   // Aberto até o dia 11; a partir do dia 12 o período bloqueia automaticamente
   let locked = now.getDate() > 11;
 
-  // Liberação temporária (válida até 23:59 do dia da concessão) ignora o bloqueio para esse usuário
+  // Liberação temporária (válida até 23:59 do dia da concessão) ignora o bloqueio para esse usuário,
+  // assim como os e-mails da lista EMAILS_SEM_BLOQUEIO (nunca bloqueiam)
   if (locked) {
     const user = getSessionUser_(token);
-    if (user && hasActiveLiberacao_(user.email)) locked = false;
+    if (user && (isSemBloqueio_(user.email) || hasActiveLiberacao_(user.email))) locked = false;
   }
 
   return {
