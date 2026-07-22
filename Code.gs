@@ -123,6 +123,40 @@ function isInativo_(v) {
   return n === 'inativo' || n === 'inactive' || n === 'false' || n === 'nao' || n === 'no' || n === '0';
 }
 
+// Strip sufixo como " GRUPO" para que "4584 GRUPO" (planilha VT) bata com "4584" (RJ-UNIDADES)
+function normMat_(mat) {
+  return norm_(String(mat).trim().replace(/\s+.*$/, ''));
+}
+
+function isDpOrAdmin_(user) {
+  return user.role === 'admin' || user.role === 'dp';
+}
+
+// Funcionários com EC NEW + outra unidade só aparecem para DP/admin, e nunca sob EC NEW.
+// Chave composta mat|unidade evita falsos positivos com matrículas duplicadas.
+function buildEcLinkedSet_() {
+  const set   = {};
+  const ss    = SpreadsheetApp.openById(FUNC_SHEET_ID);
+  const sheet = ss.getSheetByName('RJ - UNIDADES');
+  if (!sheet) return set;
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (isInativo_(rows[i][COL.ATIVO])) continue;
+    const mat = String(rows[i][COL.MATRICULA]).trim();
+    if (!mat || mat === '-') continue;
+    const unidades = [canonUnidade_(rows[i][COL.UNIDADE]), canonUnidade_(rows[i][COL.UNIDADE_SEC])]
+      .filter(function(u) { return u; });
+    const hasEcNew = unidades.some(function(u) { return norm_(u) === 'ec new'; });
+    if (!hasEcNew) continue;
+    const nonEcUnits = unidades.filter(function(u) { return norm_(u) !== 'ec new'; });
+    if (!nonEcUnits.length) continue;
+    nonEcUnits.forEach(function(u) {
+      set[normMat_(mat) + '|' + norm_(u)] = true;
+    });
+  }
+  return set;
+}
+
 // =============================================================================
 // ENTRY POINT
 // =============================================================================
@@ -738,6 +772,7 @@ function getFuncionarios(token) {
   const user = getSessionUser_(token);
   if (!user) throw new Error('Sessão inválida.');
   const allowedNorm = getAllowedUnidades_(user).map(norm_);
+  const dpOrAdmin   = isDpOrAdmin_(user);
 
   const ss    = SpreadsheetApp.openById(FUNC_SHEET_ID);
   const sheet = ss.getSheetByName('RJ - UNIDADES');
@@ -765,10 +800,23 @@ function getFuncionarios(token) {
     const unidades = [canonUnidade_(row[COL.UNIDADE]), canonUnidade_(row[COL.UNIDADE_SEC])]
       .filter(function(u, idx, arr) { return u && arr.indexOf(u) === idx; });
 
-    unidades.forEach(function(u) {
-      if (allowedNorm.indexOf(norm_(u)) === -1) return;
-      list.push({ nome: nome, matricula: matricula, cpf: cpf, unidade: u });
-    });
+    const hasEcNew   = unidades.some(function(u) { return norm_(u) === 'ec new'; });
+    const hasOther   = unidades.some(function(u) { return norm_(u) !== 'ec new'; });
+    const isEcLinked = hasEcNew && hasOther;
+
+    if (isEcLinked) {
+      if (!dpOrAdmin) continue;
+      unidades.filter(function(u) { return norm_(u) !== 'ec new'; })
+        .forEach(function(u) {
+          if (allowedNorm.indexOf(norm_(u)) === -1) return;
+          list.push({ nome: nome, matricula: matricula, cpf: cpf, unidade: u });
+        });
+    } else {
+      unidades.forEach(function(u) {
+        if (allowedNorm.indexOf(norm_(u)) === -1) return;
+        list.push({ nome: nome, matricula: matricula, cpf: cpf, unidade: u });
+      });
+    }
   }
 
   administrativo.sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR') || a.unidade.localeCompare(b.unidade, 'pt-BR'); });
@@ -915,7 +963,9 @@ function calcularVT_(e) {
 function getVTData(token) {
   const user = getSessionUser_(token);
   if (!user) throw new Error('Sessão inválida.');
-  const allowedNorm = getAllowedUnidades_(user).map(norm_);
+  const allowedNorm  = getAllowedUnidades_(user).map(norm_);
+  const ecLinkedSet  = buildEcLinkedSet_();
+  const dpOrAdmin    = isDpOrAdmin_(user);
 
   const ss = SpreadsheetApp.openById(VT_SHEET_ID);
 
@@ -925,13 +975,18 @@ function getVTData(token) {
     const out   = [];
 
     for (let i = 1; i < rows.length; i++) {
-      const r = rows[i];
-      if (allowedNorm.indexOf(norm_(canonUnidade_(r[0]))) === -1) continue;
+      const r       = rows[i];
+      const unidade = canonUnidade_(r[0]);
+      if (allowedNorm.indexOf(norm_(unidade)) === -1) continue;
       const mes = parseMes_(r[1]), ano = Number(r[2]);
       if (!mes || !ano) continue;
+      const mat = String(r[3]).trim();
+      if (norm_(unidade) !== 'ec new' && ecLinkedSet[normMat_(mat) + '|' + norm_(unidade)]) {
+        if (!dpOrAdmin) continue;
+      }
       out.push({
-        unidade: canonUnidade_(r[0]), mes: mes, ano: ano,
-        matricula: String(r[3]).trim(), cpf: String(r[4]).trim(), nome: String(r[5]).trim(),
+        unidade: unidade, mes: mes, ano: ano,
+        matricula: mat, cpf: String(r[4]).trim(), nome: String(r[5]).trim(),
         tipoIda: String(r[6]).trim(), valorIda: r[7] || 0, qtdIda: r[8] || 0,
         tipoIda2: String(r[9] || '').trim(), valorIda2: r[10] || 0, qtdIda2: r[11] || 0,
         tipoIda3: String(r[12] || '').trim(), valorIda3: r[13] || 0, qtdIda3: r[14] || 0,
