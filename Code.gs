@@ -1631,3 +1631,79 @@ function diagnosticoVT() {
       i + 2, r[0], r[1], r[2], r[3], JSON.stringify(r.slice(6)));
   });
 }
+
+// =============================================================================
+// MIGRAÇÃO PONTUAL — rode UMA vez no editor (Executar > corrigirUnidadesEcLinked).
+// Encontra linhas de ADMINISTRATIVO/DOCENTE onde a unidade está como "EC NEW"
+// mas o funcionário possui outra unidade (e deve aparecer sob ela, nunca EC NEW).
+//
+// 1ª execução: deixe DRY_RUN = true → só loga o que seria alterado, sem tocar na planilha.
+// 2ª execução: mude DRY_RUN = false → efetiva as alterações.
+// =============================================================================
+function corrigirUnidadesEcLinked() {
+  const DRY_RUN = true; // mude para false para efetivar
+
+  // 1. Monta mapa: matrícula normalizada → unidade correta (não-EC NEW)
+  const matToUnit = {};
+  const funcSheet = SpreadsheetApp.openById(FUNC_SHEET_ID).getSheetByName('RJ - UNIDADES');
+  if (!funcSheet) throw new Error('Aba RJ - UNIDADES não encontrada.');
+  const funcRows = funcSheet.getDataRange().getValues();
+  for (let i = 1; i < funcRows.length; i++) {
+    if (isInativo_(funcRows[i][COL.ATIVO])) continue;
+    const mat = String(funcRows[i][COL.MATRICULA]).trim();
+    if (!mat || mat === '-') continue;
+    const unidades = [canonUnidade_(funcRows[i][COL.UNIDADE]), canonUnidade_(funcRows[i][COL.UNIDADE_SEC])]
+      .filter(function(u) { return u; });
+    const hasEcNew   = unidades.some(function(u) { return norm_(u) === 'ec new'; });
+    if (!hasEcNew) continue;
+    const nonEcUnits = unidades.filter(function(u) { return norm_(u) !== 'ec new'; });
+    if (!nonEcUnits.length) continue;
+    matToUnit[normMat_(mat)] = nonEcUnits[0];
+  }
+
+  Logger.log('=== Mapeamento EC-linked (%s funcionários) ===', Object.keys(matToUnit).length);
+  Object.keys(matToUnit).sort().forEach(function(k) {
+    Logger.log('  mat="%s" → %s', k, matToUnit[k]);
+  });
+
+  // 2. Varre as abas VT e corrige linhas com unidade = EC NEW
+  const vtSs = SpreadsheetApp.openById(VT_SHEET_ID);
+  let totalAlteracoes = 0;
+
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(sheetName) {
+    const sheet = vtSs.getSheetByName(sheetName);
+    if (!sheet) return;
+    const rows = sheet.getDataRange().getValues();
+    const aAlterar = [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const unidade = canonUnidade_(rows[i][0]);
+      if (norm_(unidade) !== 'ec new') continue;
+      const matN = normMat_(String(rows[i][3]));
+      if (!matToUnit[matN]) continue;
+      aAlterar.push({
+        rowIdx:      i + 1,
+        mat:         String(rows[i][3]).trim(),
+        nome:        String(rows[i][5]).trim(),
+        mes:         String(rows[i][1]).trim(),
+        ano:         rows[i][2],
+        novaUnidade: matToUnit[matN]
+      });
+    }
+
+    Logger.log('\n=== %s — %s linha(s) com EC NEW para corrigir ===', sheetName, aAlterar.length);
+    aAlterar.forEach(function(a) {
+      Logger.log('  [%s] mat="%s" %s %s/%s  EC NEW → %s', a.rowIdx, a.mat, a.nome, a.mes, a.ano, a.novaUnidade);
+      if (!DRY_RUN) sheet.getRange(a.rowIdx, 1).setValue(a.novaUnidade);
+    });
+    totalAlteracoes += aAlterar.length;
+  });
+
+  Logger.log('\n%s: %s alteração(ões) %s.',
+    DRY_RUN ? 'SIMULAÇÃO' : 'CONCLUÍDO',
+    totalAlteracoes,
+    DRY_RUN ? 'encontradas (nenhuma efetivada)' : 'efetivadas');
+  if (DRY_RUN && totalAlteracoes > 0) {
+    Logger.log('→ Revise o log acima e mude DRY_RUN para false para efetivar.');
+  }
+}
