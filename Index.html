@@ -818,46 +818,24 @@ function respDaUnidade(unidade) {
 window.onload = function() {
   if (!TOKEN) { window.top.location.href = HUB_URL; return; }
   show('screenLoading');
+  // Uma única chamada traz usuário + unidades + período + funcionários + lançamentos
+  // (antes eram 5 viagens em sequência — era isso que deixava a abertura lenta)
   google.script.run
-    .withSuccessHandler(onUserLoaded)
+    .withSuccessHandler(onInitLoaded)
     .withFailureHandler(showError)
-    .getUserFromHub(TOKEN);
+    .getInitData(TOKEN);
 };
 
-function onUserLoaded(user) {
-  state.user = user;
-  google.script.run
-    .withSuccessHandler(onUnidadesLoaded)
-    .withFailureHandler(showError)
-    .getUnidades(TOKEN);
-}
-
-function onUnidadesLoaded(units) {
-  state.availableUnits = units || [];
+function onInitLoaded(data) {
+  state.user = data.user;
+  state.availableUnits = data.unidades || [];
   if (!state.availableUnits.length) {
     showError(new Error('Nenhuma unidade disponível para este usuário.'));
     return;
   }
-  google.script.run
-    .withSuccessHandler(onPeriodLoaded)
-    .withFailureHandler(showError)
-    .getCurrentPeriod(TOKEN);
-}
-
-function onPeriodLoaded(period) {
-  state.period = period;
-  google.script.run
-    .withSuccessHandler(onFuncsLoaded)
-    .withFailureHandler(showError)
-    .getFuncionarios(TOKEN);
-}
-
-function onFuncsLoaded(funcs) {
-  state.funcs = funcs;
-  google.script.run
-    .withSuccessHandler(onVTLoaded)
-    .withFailureHandler(showError)
-    .getVTData(TOKEN);
+  state.period = data.period;
+  state.funcs  = data.funcs;
+  onVTLoaded(data.vt);
 }
 
 function onVTLoaded(data) {

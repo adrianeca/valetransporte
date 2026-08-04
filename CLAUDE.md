@@ -38,6 +38,10 @@ Cada linha das tabelas Administrativo/Docente tem um ícone de comentário (💬
 - Visível tanto para o diretor quanto para o DP — mesma tela (`tabAdmin`/`tabDocente`).
 - Funciona mesmo com o período bloqueado. Só é possível comentar lançamento já salvo (`salvarComentarioVT` busca a linha por unidade+mês+ano+matrícula); linhas recém-adicionadas mostram o ícone desabilitado até serem salvas.
 
+## Abertura em uma chamada — getInitData (08/2026)
+
+O front-end abria com 5 `google.script.run` em sequência (usuário → unidades → período → funcionários → lançamentos), cada um revalidando a sessão e relendo as mesmas planilhas (~10–15s). `getInitData(token)` devolve tudo numa chamada só: valida a sessão uma vez, lê RJ-UNIDADES e as abas ADMINISTRATIVO/DOCENTE uma vez cada (`readFuncRows_`/`readVtRows_`) e monta as respostas com os cores `funcionariosFromRows_`/`vtDataFromRows_`/`getCurrentPeriodForUser_` (o filtro EC-linked reusa as mesmas linhas via `buildEcLinkedSet_(funcRows)`). Os endpoints individuais continuam existindo (`getVTData` é usado pelo `reloadData`). Mesmo padrão do Horas e VR.
+
 ## Autosave e filtros (08/2026 — padrão espelhado do Horas)
 
 - **Autosave**: `onVTRowInput` (que já recalculava o total ao vivo) agora também marca a linha como suja (`markRowDirty`, debounce de 2s); `onVTRowCommitted` (no `change` — sair do campo/Enter/troca de tipo) envia na hora. `addLeg`/`removeLeg` também disparam. `flushAutosave` manda **só as linhas sujas** pro `saveVTData` e não redesenha as tabelas durante a digitação (`refreshTablesIfIdle`). Um envio por vez; falha devolve o `_dirty` e orienta a usar o botão "Salvar dados", que continua como fallback. `beforeunload` avisa se há edição não enviada.

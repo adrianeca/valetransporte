@@ -132,14 +132,30 @@ function isDpOrAdmin_(user) {
   return user.role === 'admin' || user.role === 'dp';
 }
 
+// Leitura única da planilha de funcionários — o getInitData reaproveita as linhas
+// em todo lugar que precisa delas, em vez de reler a aba várias vezes por abertura
+function readFuncRows_() {
+  const sheet = SpreadsheetApp.openById(FUNC_SHEET_ID).getSheetByName('RJ - UNIDADES');
+  if (!sheet) throw new Error('Aba "RJ - UNIDADES" não encontrada na planilha de funcionários.');
+  return sheet.getDataRange().getValues();
+}
+
+// Idem para as abas do VT: { ADMINISTRATIVO: rows, DOCENTE: rows }
+function readVtRows_() {
+  const ss  = SpreadsheetApp.openById(VT_SHEET_ID);
+  const out = {};
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(sheetName) {
+    out[sheetName] = getOrCreateVTSheet_(ss, sheetName).getDataRange().getValues();
+  });
+  return out;
+}
+
 // Funcionários com EC NEW + outra unidade só aparecem para DP/admin, e nunca sob EC NEW.
 // Chave composta mat|unidade evita falsos positivos com matrículas duplicadas.
-function buildEcLinkedSet_() {
-  const set   = {};
-  const ss    = SpreadsheetApp.openById(FUNC_SHEET_ID);
-  const sheet = ss.getSheetByName('RJ - UNIDADES');
-  if (!sheet) return set;
-  const rows = sheet.getDataRange().getValues();
+// funcRows é opcional: quando o chamador já leu a planilha, reaproveita.
+function buildEcLinkedSet_(funcRows) {
+  const set  = {};
+  const rows = funcRows || readFuncRows_();
   for (let i = 1; i < rows.length; i++) {
     if (isInativo_(rows[i][COL.ATIVO])) continue;
     const mat = String(rows[i][COL.MATRICULA]).trim();
@@ -242,15 +258,15 @@ function isUserAllowedUnit_(user, unit) {
 
 // Todas as unidades que o usuário pode ver: as dele (se restrito) ou todas que existem
 // (com funcionário ativo cadastrado OU já com lançamento na planilha de VT).
-function getAllowedUnidades_(user) {
+// funcRows/vtRows são opcionais: quando o chamador já leu as planilhas (getInitData),
+// reaproveita; senão lê aqui mesmo.
+function getAllowedUnidades_(user, funcRows, vtRows) {
   const set = {};
 
   if (user.units && user.units.length > 0) {
     user.units.forEach(function(u) { set[u] = true; });
   } else {
-    const funcSheet = SpreadsheetApp.openById(FUNC_SHEET_ID).getSheetByName('RJ - UNIDADES');
-    if (!funcSheet) throw new Error('Aba "RJ - UNIDADES" não encontrada.');
-    const funcRows = funcSheet.getDataRange().getValues();
+    funcRows = funcRows || readFuncRows_();
     for (let i = 1; i < funcRows.length; i++) {
       const nome = String(funcRows[i][COL.NOME] || '').trim();
       if (!nome) continue;
@@ -259,10 +275,9 @@ function getAllowedUnidades_(user) {
       if (u) set[u] = true;
     }
 
-    const vtSs = SpreadsheetApp.openById(VT_SHEET_ID);
+    vtRows = vtRows || readVtRows_();
     ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(sheetName) {
-      const sheet = getOrCreateVTSheet_(vtSs, sheetName);
-      const rows  = sheet.getDataRange().getValues();
+      const rows = vtRows[sheetName];
       for (let i = 1; i < rows.length; i++) {
         const u = canonUnidade_(rows[i][0]);
         if (u) set[u] = true;
@@ -283,10 +298,44 @@ function getUnidades(token) {
 }
 
 // =============================================================================
+// INICIALIZAÇÃO EM UMA CHAMADA — o front-end fazia 5 google.script.run em
+// sequência (usuário → unidades → período → funcionários → lançamentos), cada um
+// com sua viagem de rede e relendo sessão/planilhas do zero. Aqui valida a sessão
+// UMA vez, lê cada planilha UMA vez e devolve tudo junto (abertura ~4x mais rápida).
+// Os endpoints individuais continuam existindo (reloadData usa getVTData).
+// =============================================================================
+
+function getInitData(token) {
+  const user = getUserFromHub(token);
+
+  const funcRows = readFuncRows_();
+  const vtRows   = readVtRows_();
+
+  const unidades    = getAllowedUnidades_(user, funcRows, vtRows);
+  const allowedNorm = unidades.map(norm_);
+  const dpOrAdmin   = isDpOrAdmin_(user);
+
+  return {
+    user:     user,
+    unidades: unidades,
+    period:   getCurrentPeriodForUser_(user),
+    funcs:    funcionariosFromRows_(allowedNorm, dpOrAdmin, funcRows),
+    vt:       vtDataFromRows_(allowedNorm, buildEcLinkedSet_(funcRows), dpOrAdmin, vtRows)
+  };
+}
+
+// =============================================================================
 // PERÍODO VIGENTE — o VT só tem "Previsto" (preenchido um mês antes), sem Efetivo
 // =============================================================================
 
 function getCurrentPeriod(token) {
+  // Só busca a sessão quando o bloqueio importa (a partir do dia 12)
+  const user = new Date().getDate() > 11 ? getSessionUser_(token) : null;
+  return getCurrentPeriodForUser_(user);
+}
+
+// Versão que reaproveita um user já autenticado (getInitData) em vez de reler a sessão
+function getCurrentPeriodForUser_(user) {
   const now = new Date();
   const mes = now.getMonth() + 1;
   const ano = now.getFullYear();
@@ -300,10 +349,7 @@ function getCurrentPeriod(token) {
 
   // Liberação temporária (válida até 23:59 do dia da concessão) ignora o bloqueio para esse usuário,
   // assim como os e-mails da lista EMAILS_SEM_BLOQUEIO (nunca bloqueiam)
-  if (locked) {
-    const user = getSessionUser_(token);
-    if (user && (isSemBloqueio_(user.email) || hasActiveLiberacao_(user.email))) locked = false;
-  }
+  if (locked && user && (isSemBloqueio_(user.email) || hasActiveLiberacao_(user.email))) locked = false;
 
   return {
     previsto: { mes: previstoMes, ano: previstoAno },
@@ -771,14 +817,11 @@ function enviarEmailRespostaSolicitacao_(solic, aprovada, obsDP, expira) {
 function getFuncionarios(token) {
   const user = getSessionUser_(token);
   if (!user) throw new Error('Sessão inválida.');
-  const allowedNorm = getAllowedUnidades_(user).map(norm_);
-  const dpOrAdmin   = isDpOrAdmin_(user);
+  const rows = readFuncRows_();
+  return funcionariosFromRows_(getAllowedUnidades_(user, rows).map(norm_), isDpOrAdmin_(user), rows);
+}
 
-  const ss    = SpreadsheetApp.openById(FUNC_SHEET_ID);
-  const sheet = ss.getSheetByName('RJ - UNIDADES');
-  if (!sheet) throw new Error('Aba "RJ - UNIDADES" não encontrada na planilha de funcionários.');
-  const rows  = sheet.getDataRange().getValues();
-
+function funcionariosFromRows_(allowedNorm, dpOrAdmin, rows) {
   const administrativo = [];
   const docente        = [];
 
@@ -963,16 +1006,15 @@ function calcularVT_(e) {
 function getVTData(token) {
   const user = getSessionUser_(token);
   if (!user) throw new Error('Sessão inválida.');
-  const allowedNorm  = getAllowedUnidades_(user).map(norm_);
-  const ecLinkedSet  = buildEcLinkedSet_();
-  const dpOrAdmin    = isDpOrAdmin_(user);
+  const vtRows = readVtRows_();
+  return vtDataFromRows_(getAllowedUnidades_(user, null, vtRows).map(norm_),
+    buildEcLinkedSet_(), isDpOrAdmin_(user), vtRows);
+}
 
-  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
-
+function vtDataFromRows_(allowedNorm, ecLinkedSet, dpOrAdmin, vtRows) {
   function readSheet(sheetName) {
-    const sheet = getOrCreateVTSheet_(ss, sheetName);
-    const rows  = sheet.getDataRange().getValues();
-    const out   = [];
+    const rows = vtRows[sheetName];
+    const out  = [];
 
     for (let i = 1; i < rows.length; i++) {
       const r       = rows[i];
