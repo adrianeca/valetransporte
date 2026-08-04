@@ -48,6 +48,8 @@ O front-end abria com 5 `google.script.run` em sequência (usuário → unidades
 - **Filtros preservam o que foi digitado**: `syncBeforeFilterChange()` (sync das duas tabelas + `clearKeepVisible`) roda antes de qualquer mudança de filtro — antes disso, trocar filtro APAGAVA valores digitados e não salvos (correção que o Horas já tinha e o VT não).
 - **Linhas novas furam os filtros**: `passesFilter` deixa passar `_new`/`_keepVisible` — com filtro de mês ativo, a linha do "+ Adicionar"/"Copiar mês anterior" sumia da tela e ficava fora do salvamento. `_keepVisible` sobrevive ao salvar+recarregar (reaplicado por chave unidade+mês+ano+matrícula em `onVTLoaded`) e é limpo ao mexer em qualquer filtro.
 - **Salvar manual envia o período aberto INTEIRO** (state, não DOM filtrado) — linha escondida por filtro com edição pendente também é salva.
+- **Opções de filtro atualizam ao adicionar/copiar**: `renderFilterBar()` roda de novo após "+ Adicionar"/"Copiar mês anterior" (o ano da linha nova só entrava no filtro depois de recarregar).
+- **"Copiar mês anterior" já salva sozinho**: linhas copiadas nascem `_dirty` + `flushAutosave()` na sequência — copiar sem editar nada não salvava, pois o autosave só disparava em edição de campo. O "+ Adicionar" continua salvando só a partir da primeira digitação (linha zerada abandonada não vira lançamento).
 - **Opções de filtro atualizam ao adicionar/copiar**: `renderFilterBar()` roda de novo após "+ Adicionar"/"Copiar mês anterior" (o ano da linha nova — ex.: janeiro lançado em dezembro — só entrava no filtro de ano depois de recarregar).
 
 ## Período e bloqueio

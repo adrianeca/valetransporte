@@ -1532,7 +1532,8 @@ function copyFromPreviousMonth(type) {
       tipoVolta3: r.tipoVolta3 || '', valorVolta3: r.valorVolta3 || 0, qtdVolta3: r.qtdVolta3 || 0,
       total: r.total, diasTrabalhados: r.diasTrabalhados, valorDiario: r.valorDiario,
       valorJae: r.valorJae, valorRiocard: r.valorRiocard,
-      _new: true, _keepVisible: true
+      _new: true, _keepVisible: true,
+      _dirty: true // copiar já salva sozinho — sem depender de editar um campo ou clicar em "Salvar dados"
     });
   });
 
@@ -1540,7 +1541,8 @@ function copyFromPreviousMonth(type) {
 
   if (isAdmin) renderAdminTable(); else renderDocenteTable();
   renderFilterBar(); // o ano das linhas copiadas entra nas opções de filtro
-  setStatus(entries.length + ' lançamento(s) copiado(s) do mês anterior. Revise — o salvamento automático guarda as alterações.', 'success');
+  setStatus(entries.length + ' lançamento(s) copiado(s) do mês anterior — salvando automaticamente...', 'saving');
+  flushAutosave();
 }
 
 // ── ADICIONAR FUNCIONÁRIO (só para o Previsto do mês seguinte, único período do VT) ──
