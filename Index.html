@@ -859,7 +859,7 @@ function onVTLoaded(data) {
 }
 
 function rowKey_(r) {
-  return normStr(r.unidade) + '|' + r.mes + '|' + r.ano + '|' + r.matricula;
+  return normStr(r.unidade) + '|' + r.mes + '|' + r.ano + '|' + normStr(r.nome);
 }
 
 // ── RENDER ──────────────────────────────────────────────────
@@ -1475,22 +1475,24 @@ function copyableEntries(type) {
 
   var existing = {};
   rows.forEach(function(r) {
-    if (isSamePeriod(r, target)) existing[normStr(r.unidade) + '|' + r.matricula] = true;
+    // Casamento por NOME (não matrícula): recém-admitido vem com matrícula
+    // placeholder ("-") no cadastro, e duas iguais casavam com a pessoa errada
+    if (isSamePeriod(r, target)) existing[normStr(r.unidade) + '|' + normStr(r.nome)] = true;
   });
 
   var funcMap = {};
   (isAdmin ? state.funcs.administrativo : state.funcs.docente).forEach(function(e) {
-    funcMap[normStr(e.unidade) + '|' + e.matricula] = e;
+    funcMap[normStr(e.unidade) + '|' + normStr(e.nome)] = e;
   });
 
   return rows.filter(function(r) {
     if (r.mes !== prev.mes || r.ano !== prev.ano) return false;
     if (units.indexOf(normStr(r.unidade)) === -1) return false;
-    var key = normStr(r.unidade) + '|' + r.matricula;
+    var key = normStr(r.unidade) + '|' + normStr(r.nome);
     if (existing[key]) return false;
     return !!funcMap[key];
   }).map(function(r) {
-    return { prevRow: r, emp: funcMap[normStr(r.unidade) + '|' + r.matricula] };
+    return { prevRow: r, emp: funcMap[normStr(r.unidade) + '|' + normStr(r.nome)] };
   });
 }
 
@@ -1576,12 +1578,14 @@ function populateAddEmpDropdown(type) {
 
   var already = {};
   rows.forEach(function(r) {
-    if (isSamePeriod(r, target) && normStr(r.unidade) === unidade) already[r.matricula] = true;
+    // Por NOME: a chave do lançamento é unidade+mês+ano+nome, e duas matrículas
+    // placeholder ("-") iguais escondiam do dropdown quem ainda não foi lançado
+    if (isSamePeriod(r, target) && normStr(r.unidade) === unidade) already[normStr(r.nome)] = true;
   });
 
   var allEmps = (isAdmin ? state.funcs.administrativo : state.funcs.docente)
     .filter(function(e) { return normStr(e.unidade) === unidade; });
-  var emps = allEmps.filter(function(e) { return !already[e.matricula]; });
+  var emps = allEmps.filter(function(e) { return !already[normStr(e.nome)]; });
 
   if (!allEmps.length) {
     empSel.innerHTML = '<option value="">— Nenhum funcionário cadastrado nesta unidade —</option>';
@@ -1774,7 +1778,7 @@ function deleteRow(type, idx) {
     })
     .deleteVTEntry({
       token: TOKEN, categoria: type,
-      unidade: r.unidade, mes: r.mes, ano: r.ano, matricula: r.matricula
+      unidade: r.unidade, mes: r.mes, ano: r.ano, matricula: r.matricula, nome: r.nome
     });
 }
 
@@ -1829,7 +1833,7 @@ function salvarComentario() {
     })
     .salvarComentarioVT({
       token: TOKEN, categoria: comentarioState.categoria,
-      unidade: r.unidade, mes: r.mes, ano: r.ano, matricula: r.matricula,
+      unidade: r.unidade, mes: r.mes, ano: r.ano, matricula: r.matricula, nome: r.nome,
       comentario: texto
     });
 }

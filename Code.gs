@@ -97,8 +97,45 @@ function canonUnidade_(u) {
 }
 
 // Extrai o número do mês mesmo quando a célula guarda texto como "06 Junho" (em vez de 6)
+// Aceita também DATA de verdade: o appendRow interpretava "08 Agosto" como digitação
+// e convertia a célula em data — a linha então "sumia" do app porque parseInt dava NaN.
+// (Lição aprendida no webapp de Horas; hoje linha nova é gravada com setValues.)
 function parseMes_(v) {
+  if (v instanceof Date) return v.getMonth() + 1;
   return parseInt(String(v).trim(), 10) || 0;
+}
+
+// =============================================================================
+// CHAVE DE LANÇAMENTO — unidade + mês/ano + NOME completo (coluna F).
+// A matrícula NÃO entra na chave (decisão da Adriane, 03/08/2026, portada do
+// webapp de Horas): funcionário recém-admitido costuma vir com matrícula
+// placeholder ("-") ou vazia no cadastro, e dois "-" na mesma unidade colidiam
+// na mesma chave — um salvamento sobrescrevia a linha do outro. O nome vem do
+// cadastro e é escrito pelo próprio app, então bate nos dois lados.
+// =============================================================================
+
+function chaveVT_(unidade, mes, ano, nome) {
+  return norm_(unidade) + '|' + Number(mes) + '|' + Number(ano) + '|' + norm_(nome);
+}
+
+// Chave da linha crua de getDataRange(): Unidade(0) | Mês(1) | Ano(2) | Matrícula(3) | CPF(4) | Nome(5)
+function chaveVTRow_(r) {
+  return chaveVT_(canonUnidade_(r[0]), parseMes_(r[1]), Number(r[2]), r[5]);
+}
+
+// Chave ANTIGA (por matrícula), usada só como ponte pras linhas gravadas antes da
+// troca de chave: uma linha cujo nome na planilha não bate exatamente com o do
+// cadastro ainda é encontrada por aqui e tem o nome corrigido, em vez de virar
+// linha duplicada. Devolve '' para matrícula vazia ou placeholder ("-"), que não
+// identifica ninguém — é justamente o caso que motivou a troca de chave.
+function chaveMatVT_(unidade, mes, ano, matricula) {
+  const m = String(matricula || '').trim();
+  if (!m || m === '-' || m === '–') return '';
+  return norm_(unidade) + '|' + Number(mes) + '|' + Number(ano) + '|' + norm_(m);
+}
+
+function chaveMatVTRow_(r) {
+  return chaveMatVT_(canonUnidade_(r[0]), parseMes_(r[1]), Number(r[2]), r[3]);
 }
 
 // Padrão de escrita do mês na planilha: "06 Junho", "07 Julho"...
@@ -1105,8 +1142,22 @@ function saveVTData(payload) {
     ];
   }
 
-  _upsertRows_(adminSheet, adminEntries, valuesFn, user.email, forcedByLiberacao);
-  _upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email, forcedByLiberacao);
+  // Trava de script: dois salvamentos simultâneos leriam o mesmo estado da planilha
+  // e criariam linhas duplicadas para o mesmo lançamento
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let ambiguos;
+  try {
+    ambiguos = _upsertRows_(adminSheet, adminEntries, valuesFn, user.email, forcedByLiberacao)
+      .concat(_upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email, forcedByLiberacao));
+  } finally {
+    lock.releaseLock();
+  }
+
+  if (ambiguos.length) {
+    throw new Error('Salvamento parcial: a planilha tem mais de uma linha para ' + ambiguos.join(', ') +
+      ' no mesmo mês (mesmo nome repetido na unidade). Os dados dessas pessoas NÃO foram salvos — os demais foram. Peça ao DP para corrigir a planilha.');
+  }
 
   return { success: true };
 }
@@ -1124,23 +1175,20 @@ function salvarComentarioVT(payload) {
   const unidade = canonUnidade_(payload.unidade);
   if (!isUserAllowedUnit_(user, unidade)) throw new Error('Você não tem permissão para esta unidade.');
 
-  const sheetName = payload.categoria === 'docente' ? 'DOCENTE' : 'ADMINISTRATIVO';
-  const mat        = String(payload.matricula || '').trim();
-  const mes        = Number(payload.mes), ano = Number(payload.ano);
+  const sheetName  = payload.categoria === 'docente' ? 'DOCENTE' : 'ADMINISTRATIVO';
   const comentario = String(payload.comentario || '').trim();
-  const key = norm_(unidade) + '|' + mes + '|' + ano + '|' + mat;
+  const key = chaveVT_(unidade, payload.mes, payload.ano, payload.nome);
 
   const ss      = SpreadsheetApp.openById(VT_SHEET_ID);
   const sheet   = getOrCreateVTSheet_(ss, sheetName);
   const allRows = sheet.getDataRange().getValues();
 
-  let rowIdx = 0;
+  let rowIdx = 0, matches = 0;
   for (let i = 1; i < allRows.length; i++) {
-    const r = allRows[i];
-    const k = norm_(canonUnidade_(r[0])) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim();
-    if (k === key) { rowIdx = i + 1; break; }
+    if (chaveVTRow_(allRows[i]) === key) { rowIdx = i + 1; matches++; }
   }
   if (!rowIdx) throw new Error('Lançamento não encontrado — salve os dados antes de comentar.');
+  if (matches > 1) throw new Error('Há mais de uma linha na planilha para esta pessoa neste mês. Peça ao DP para corrigir a planilha antes de comentar.');
 
   const comCol1 = VT_HEADERS[sheetName].indexOf('Comentário') + 1; // 1-based
   const agora = comentario ? new Date() : '';
@@ -1168,24 +1216,54 @@ function _valMudou_(antigo, novo) {
 // Se a edição só foi possível por uma liberação concedida após o dia 11, grava também
 // quais campos específicos de trecho mudaram (coluna "Campos Editados (Liberação)"),
 // pra sinalizar com asterisco no front-end; edição normal dentro do prazo limpa essa coluna.
+// Devolve a lista de lançamentos recusados por ambiguidade (nome repetido na
+// unidade/mês) — o chamador avisa o usuário em vez de gravar em linha imprevisível.
 function _upsertRows_(sheet, entries, valuesFn, editorEmail, forcedByLiberacao) {
-  if (!entries || !entries.length) return;
+  if (!entries || !entries.length) return [];
 
   const camposCol1 = VT_HEADERS[sheet.getName()].indexOf('Campos Editados (Liberação)') + 1;
 
   const allRows = sheet.getDataRange().getValues();
-  const map = {};
+  const map = {}, duplicada = {};
+  const porMat = {}, matDuplicada = {};
   for (let i = 1; i < allRows.length; i++) {
-    const r = allRows[i];
-    map[norm_(canonUnidade_(r[0])) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim()] = i + 1;
+    const k = chaveVTRow_(allRows[i]);
+    if (map[k]) duplicada[k] = true;
+    map[k] = i + 1;
+
+    const km = chaveMatVTRow_(allRows[i]);
+    if (km) {
+      if (porMat[km]) matDuplicada[km] = true;
+      porMat[km] = i + 1;
+    }
   }
 
+  const ambiguos = [];
   entries.forEach(function(e) {
     const mat    = String(e.matricula).trim();
-    const key    = norm_(e.unidade) + '|' + Number(e.mes) + '|' + Number(e.ano) + '|' + mat;
+    const key    = chaveVT_(e.unidade, e.mes, e.ano, e.nome);
     const values = valuesFn(e);
-    if (map[key]) {
-      const rowIdx = map[key];
+
+    // Mais de uma linha na planilha com essa mesma chave: gravar iria parar
+    // numa linha imprevisível — pula e avisa em vez de corromper
+    if (duplicada[key]) { ambiguos.push(e.nome + ' (' + e.unidade + ')'); return; }
+
+    let rowIdx = map[key];
+
+    // Ponte de migração: linha gravada com a chave antiga cujo NOME na planilha não
+    // bate exatamente com o do cadastro (nome corrigido pelo DP, migração de planilha
+    // antiga) é reencontrada pela matrícula — quando ela é real e única — e tem o nome
+    // acertado. Sem isso o salvamento criaria uma segunda linha para a mesma pessoa.
+    if (!rowIdx) {
+      const km = chaveMatVT_(e.unidade, e.mes, e.ano, mat);
+      if (km && porMat[km] && !matDuplicada[km]) {
+        rowIdx = porMat[km];
+        sheet.getRange(rowIdx, 6).setValue(e.nome); // coluna F = Nome
+        map[key] = rowIdx;
+      }
+    }
+
+    if (rowIdx) {
       // Compara com o que estava na planilha ANTES deste salvamento (linhas recém-criadas
       // neste mesmo save não entram na comparação)
       if (rowIdx <= allRows.length) {
@@ -1203,10 +1281,17 @@ function _upsertRows_(sheet, entries, valuesFn, editorEmail, forcedByLiberacao) 
       }
       sheet.getRange(rowIdx, 7, 1, values.length).setValues([values]);
     } else {
-      sheet.appendRow([e.unidade, mesLabel_(e.mes), e.ano, mat, e.cpf || '', e.nome].concat(values));
-      map[key] = sheet.getLastRow();
+      // setValues em vez de appendRow: o appendRow interpreta os valores como
+      // digitação e converte o texto "08 Agosto" em DATA — a linha então some do
+      // app na releitura (mesmo estrago já corrigido no webapp de Horas).
+      const newRow  = sheet.getLastRow() + 1;
+      const rowData = [e.unidade, mesLabel_(e.mes), e.ano, mat, e.cpf || '', e.nome].concat(values);
+      sheet.getRange(newRow, 1, 1, rowData.length).setValues([rowData]);
+      map[key] = newRow;
     }
   });
+
+  return ambiguos;
 }
 
 // =============================================================================
@@ -1342,18 +1427,17 @@ function deleteVTEntry(payload) {
   const ss    = SpreadsheetApp.openById(VT_SHEET_ID);
   const sheet = getOrCreateVTSheet_(ss, sheetName);
 
-  const key  = norm_(payload.unidade) + '|' + Number(payload.mes) + '|' + Number(payload.ano) + '|' + String(payload.matricula).trim();
+  const key  = chaveVT_(payload.unidade, payload.mes, payload.ano, payload.nome);
   const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    const k = norm_(canonUnidade_(r[0])) + '|' + parseMes_(r[1]) + '|' + Number(r[2]) + '|' + String(r[3]).trim();
-    if (k === key) {
-      sheet.deleteRow(i + 1);
-      return { success: true };
-    }
-  }
 
-  // Linha não encontrada na planilha (provavelmente nunca foi salva) — nada a fazer
+  let rowIdx = 0, matches = 0;
+  for (let i = 1; i < rows.length; i++) {
+    if (chaveVTRow_(rows[i]) === key) { rowIdx = i + 1; matches++; }
+  }
+  if (matches > 1) throw new Error('Há mais de uma linha na planilha para esta pessoa neste mês. Peça ao DP para corrigir a planilha antes de excluir.');
+  if (rowIdx) sheet.deleteRow(rowIdx);
+
+  // Linha não encontrada = provavelmente nunca foi salva — nada a fazer
   return { success: true };
 }
 
