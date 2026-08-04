@@ -38,6 +38,14 @@ Cada linha das tabelas Administrativo/Docente tem um ícone de comentário (💬
 - Visível tanto para o diretor quanto para o DP — mesma tela (`tabAdmin`/`tabDocente`).
 - Funciona mesmo com o período bloqueado. Só é possível comentar lançamento já salvo (`salvarComentarioVT` busca a linha por unidade+mês+ano+matrícula); linhas recém-adicionadas mostram o ícone desabilitado até serem salvas.
 
+## Autosave e filtros (08/2026 — padrão espelhado do Horas)
+
+- **Autosave**: `onVTRowInput` (que já recalculava o total ao vivo) agora também marca a linha como suja (`markRowDirty`, debounce de 2s); `onVTRowCommitted` (no `change` — sair do campo/Enter/troca de tipo) envia na hora. `addLeg`/`removeLeg` também disparam. `flushAutosave` manda **só as linhas sujas** pro `saveVTData` e não redesenha as tabelas durante a digitação (`refreshTablesIfIdle`). Um envio por vez; falha devolve o `_dirty` e orienta a usar o botão "Salvar dados", que continua como fallback. `beforeunload` avisa se há edição não enviada.
+- **Filtros preservam o que foi digitado**: `syncBeforeFilterChange()` (sync das duas tabelas + `clearKeepVisible`) roda antes de qualquer mudança de filtro — antes disso, trocar filtro APAGAVA valores digitados e não salvos (correção que o Horas já tinha e o VT não).
+- **Linhas novas furam os filtros**: `passesFilter` deixa passar `_new`/`_keepVisible` — com filtro de mês ativo, a linha do "+ Adicionar"/"Copiar mês anterior" sumia da tela e ficava fora do salvamento. `_keepVisible` sobrevive ao salvar+recarregar (reaplicado por chave unidade+mês+ano+matrícula em `onVTLoaded`) e é limpo ao mexer em qualquer filtro.
+- **Salvar manual envia o período aberto INTEIRO** (state, não DOM filtrado) — linha escondida por filtro com edição pendente também é salva.
+- **Opções de filtro atualizam ao adicionar/copiar**: `renderFilterBar()` roda de novo após "+ Adicionar"/"Copiar mês anterior" (o ano da linha nova — ex.: janeiro lançado em dezembro — só entrava no filtro de ano depois de recarregar).
+
 ## Período e bloqueio
 
 - Só existe "Previsto" (sem Efetivo como no VR) — o diretor lança o **mês seguinte**, adiantado. Ex.: VT de agosto é lançado em julho.

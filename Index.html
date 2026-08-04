@@ -861,14 +861,27 @@ function onFuncsLoaded(funcs) {
 }
 
 function onVTLoaded(data) {
+  // Preserva a visibilidade "fura-filtro" das linhas adicionadas nesta sessão,
+  // senão elas sumiriam da tela logo depois do salvar+recarregar (com filtro ativo)
+  var keepAdmin = {}, keepDocente = {};
+  (state.adminRows   || []).forEach(function(r) { if (r._new || r._keepVisible) keepAdmin[rowKey_(r)]   = true; });
+  (state.docenteRows || []).forEach(function(r) { if (r._new || r._keepVisible) keepDocente[rowKey_(r)] = true; });
+
   state.adminRows   = data.administrativo || [];
   state.docenteRows = data.docente        || [];
+  state.adminRows.forEach(function(r)   { if (keepAdmin[rowKey_(r)])   r._keepVisible = true; });
+  state.docenteRows.forEach(function(r) { if (keepDocente[rowKey_(r)]) r._keepVisible = true; });
+
   // As colunas calculadas gravadas podem ter vindo de uma fórmula antiga; no período
   // aberto (ainda editável) recalcula ao carregar para exibir sempre a fórmula vigente.
   state.adminRows.concat(state.docenteRows).forEach(function(r) {
     if (isOpenPeriod(r)) recalcRow(r);
   });
   renderUI();
+}
+
+function rowKey_(r) {
+  return normStr(r.unidade) + '|' + r.mes + '|' + r.ano + '|' + r.matricula;
 }
 
 // ── RENDER ──────────────────────────────────────────────────
@@ -1000,31 +1013,49 @@ function updateRespFilterLabel() {
     n === 0 ? 'Todas' : state.respFilter.join(', ');
 }
 
+// Antes de mudar o filtro, copia o que está digitado nas tabelas de volta pro state
+// (o redesenho reconstruiria os inputs e apagaria valores ainda não salvos) e faz as
+// linhas já salvas voltarem a obedecer o filtro (_keepVisible some; _new continua visível).
+function syncBeforeFilterChange() {
+  syncDomToState('admin');
+  syncDomToState('docente');
+  clearKeepVisible();
+}
+
+function clearKeepVisible() {
+  state.adminRows.concat(state.docenteRows).forEach(function(r) { if (!r._new) delete r._keepVisible; });
+}
+
 function onUnitFilterCheck() {
+  syncBeforeFilterChange();
   state.unitFilter = multiselectValues('unitFilterPanel');
   updateUnitFilterLabel();
   refreshFilteredViews();
 }
 
 function onRespFilterCheck() {
+  syncBeforeFilterChange();
   state.respFilter = multiselectValues('respFilterPanel');
   updateRespFilterLabel();
   refreshFilteredViews();
 }
 
 function onYearFilterCheck() {
+  syncBeforeFilterChange();
   state.yearFilter = multiselectValues('yearFilterPanel');
   updateYearFilterLabel();
   refreshFilteredViews();
 }
 
 function onMonthFilterCheck() {
+  syncBeforeFilterChange();
   state.monthFilter = multiselectValues('monthFilterPanel');
   updateMonthFilterLabel();
   refreshFilteredViews();
 }
 
 function clearFilters() {
+  syncBeforeFilterChange();
   state.unitFilter  = [];
   state.respFilter  = [];
   state.yearFilter  = [];
@@ -1044,6 +1075,10 @@ function visibleUnits() {
 }
 
 function passesFilter(r) {
+  // Linha adicionada/copiada nesta sessão fica SEMPRE visível, mesmo com filtros ativos:
+  // sem isso, "+ Adicionar" com filtro de mês ativo escondia a linha nova na hora
+  // (e ela ficava de fora do salvamento) — parecia que o app tinha "comido" o lançamento.
+  if (r._new || r._keepVisible) return true;
   var units = visibleUnits().map(normStr);
   if (units.indexOf(normStr(r.unidade)) === -1) return false;
   if (state.yearFilter.length  && state.yearFilter.indexOf(String(r.ano)) === -1) return false;
@@ -1276,6 +1311,8 @@ function onVTRowInput(el) {
   tr.querySelector('.vt-diario').textContent  = fmtBRL(c.valorDiario);
   tr.querySelector('.vt-jae').textContent     = semRateio ? '—' : fmtBRL(c.jae);
   tr.querySelector('.vt-riocard').textContent = semRateio ? '—' : fmtBRL(c.riocard);
+
+  markRowDirty(el); // agenda o autosave desta linha
 }
 
 // ── TABELAS DE PREENCHIMENTO (mostra só o que já foi lançado; "+ Adicionar" cria linha nova) ──
@@ -1284,12 +1321,13 @@ function tipoSelectHtml(cls, val, editable) {
   var opts = TIPOS.map(function(t) {
     return '<option value="' + esc(t) + '"' + (t === val ? ' selected' : '') + '>' + esc(t) + '</option>';
   }).join('');
-  return '<select class="' + cls + ' vt-tipo-sel"' + (editable ? ' onchange="onVTRowInput(this)"' : ' disabled') + '>' + opts + '</select>';
+  return '<select class="' + cls + ' vt-tipo-sel"' + (editable ? ' onchange="onVTRowCommitted(this)"' : ' disabled') + '>' + opts + '</select>';
 }
 
 function numInputHtml(cls, extraCls, val, editable, step) {
   return '<input type="number" class="' + cls + ' ' + extraCls + '" min="0" step="' + step + '" value="' +
-    (Number(val) || 0) + '"' + (editable ? ' oninput="onVTRowInput(this)"' : ' disabled') + '>';
+    (Number(val) || 0) + '"' +
+    (editable ? ' oninput="onVTRowInput(this)" onchange="onVTRowCommitted(this)"' : ' disabled') + '>';
 }
 
 // Célula de Tipo do sentido (ida/volta): trecho 1 sempre; trechos 2 e 3 empilhados quando existem.
@@ -1499,6 +1537,8 @@ function copyFromPreviousMonth(type) {
     MESES[target.mes - 1] + ' / ' + target.ano + '? Você poderá editar os valores antes de salvar.';
   if (!window.confirm(msg)) return;
 
+  syncDomToState(type); // o redesenho abaixo não pode apagar valores digitados e não salvos
+
   var rows = isAdmin ? state.adminRows : state.docenteRows;
 
   entries.forEach(function(item) {
@@ -1514,14 +1554,15 @@ function copyFromPreviousMonth(type) {
       tipoVolta3: r.tipoVolta3 || '', valorVolta3: r.valorVolta3 || 0, qtdVolta3: r.qtdVolta3 || 0,
       total: r.total, diasTrabalhados: r.diasTrabalhados, valorDiario: r.valorDiario,
       valorJae: r.valorJae, valorRiocard: r.valorRiocard,
-      _new: true
+      _new: true, _keepVisible: true
     });
   });
 
   rows.sort(function(a, b) { return (a.ano - b.ano) || (a.mes - b.mes) || a.unidade.localeCompare(b.unidade, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'); });
 
   if (isAdmin) renderAdminTable(); else renderDocenteTable();
-  setStatus(entries.length + ' lançamento(s) copiado(s) do mês anterior. Revise e clique em "Salvar dados".', 'success');
+  renderFilterBar(); // o ano das linhas copiadas entra nas opções de filtro
+  setStatus(entries.length + ' lançamento(s) copiado(s) do mês anterior. Revise — o salvamento automático guarda as alterações.', 'success');
 }
 
 // ── ADICIONAR FUNCIONÁRIO (só para o Previsto do mês seguinte, único período do VT) ──
@@ -1589,6 +1630,8 @@ function addRow(type) {
   var emp  = emps.filter(function(e) { return e.matricula === mat && normStr(e.unidade) === normStr(unidade); })[0];
   if (!emp) return;
 
+  syncDomToState(type); // o redesenho abaixo não pode apagar valores digitados e não salvos
+
   var target = state.period.previsto;
   var rows   = isAdmin ? state.adminRows : state.docenteRows;
 
@@ -1599,12 +1642,14 @@ function addRow(type) {
     tipoIda2: '', valorIda2: 0, qtdIda2: 0, tipoVolta2: '', valorVolta2: 0, qtdVolta2: 0,
     tipoIda3: '', valorIda3: 0, qtdIda3: 0, tipoVolta3: '', valorVolta3: 0, qtdVolta3: 0,
     total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0,
-    _new: true
+    _new: true, _keepVisible: true
   });
 
   rows.sort(function(a, b) { return (a.ano - b.ano) || (a.mes - b.mes) || a.unidade.localeCompare(b.unidade, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'); });
 
   if (isAdmin) renderAdminTable(); else renderDocenteTable();
+  renderFilterBar(); // o ano da linha nova (ex.: janeiro lançado em dezembro) entra nas opções de filtro
+  setStatus(emp.nome + ' adicionado(a) em ' + MESES[target.mes - 1] + ' / ' + target.ano + ' — preencha os trechos.', 'success');
 }
 
 // ── EXCLUIR LANÇAMENTO (só do período aberto) ──────────────────
@@ -1672,6 +1717,9 @@ function addLeg(type, idx, sentido) {
     if (!r.tipoVolta2) { r.tipoVolta2 = TIPOS[0]; r.valorVolta2 = 0; r.qtdVolta2 = Number(r.qtdVolta) || 0; }
     else               { r.tipoVolta3 = TIPOS[0]; r.valorVolta3 = 0; r.qtdVolta3 = Number(r.qtdVolta) || 0; }
   }
+  r._dirty = true;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(flushAutosave, AUTOSAVE_DELAY_MS);
   rerenderTable(type);
 }
 
@@ -1688,7 +1736,9 @@ function removeLeg(type, idx, sentido) {
     else              { r.tipoVolta2 = ''; r.valorVolta2 = 0; r.qtdVolta2 = 0; }
   }
   recalcRow(r); // o total muda ao remover o trecho
+  r._dirty = true;
   rerenderTable(type);
+  flushAutosave(); // remoção de trecho é mudança confirmada: salva já
 }
 
 function deleteRow(type, idx) {
@@ -2047,42 +2097,51 @@ function isOpenPeriod(r) {
   return isSamePeriod(r, state.period.previsto);
 }
 
-function collectEntries(rowsFiltered, rowEls) {
-  var out = [];
-  rowsFiltered.forEach(function(r, i) {
-    if (!isOpenPeriod(r)) return; // só envia o período aberto (VT só tem Previsto)
-    var row = rowEls[i];
-    out.push({
-      unidade: r.unidade, matricula: r.matricula, cpf: r.cpf, nome: r.nome, mes: r.mes, ano: r.ano,
-      tipoIda:   rowValStr(row, 'vt-tipo-ida'),   valorIda:   rowValNum(row, 'vt-valor-ida'),   qtdIda:   rowValNum(row, 'vt-qtd-ida'),
-      tipoVolta: rowValStr(row, 'vt-tipo-volta'), valorVolta: rowValNum(row, 'vt-valor-volta'), qtdVolta: rowValNum(row, 'vt-qtd-volta'),
-      tipoIda2:   rowValStr(row, 'vt-tipo-ida2'),   valorIda2:   rowValNum(row, 'vt-valor-ida2'),   qtdIda2:   rowValNum(row, 'vt-qtd-ida2'),
-      tipoVolta2: rowValStr(row, 'vt-tipo-volta2'), valorVolta2: rowValNum(row, 'vt-valor-volta2'), qtdVolta2: rowValNum(row, 'vt-qtd-volta2'),
-      tipoIda3:   rowValStr(row, 'vt-tipo-ida3'),   valorIda3:   rowValNum(row, 'vt-valor-ida3'),   qtdIda3:   rowValNum(row, 'vt-qtd-ida3'),
-      tipoVolta3: rowValStr(row, 'vt-tipo-volta3'), valorVolta3: rowValNum(row, 'vt-valor-volta3'), qtdVolta3: rowValNum(row, 'vt-qtd-volta3')
-    });
-  });
-  return out;
+function entryFromRow(r) {
+  return {
+    unidade: r.unidade, matricula: r.matricula, cpf: r.cpf, nome: r.nome, mes: r.mes, ano: r.ano,
+    tipoIda:   r.tipoIda   || '', valorIda:   Number(r.valorIda)   || 0, qtdIda:   Number(r.qtdIda)   || 0,
+    tipoVolta: r.tipoVolta || '', valorVolta: Number(r.valorVolta) || 0, qtdVolta: Number(r.qtdVolta) || 0,
+    tipoIda2:   r.tipoIda2   || '', valorIda2:   Number(r.valorIda2)   || 0, qtdIda2:   Number(r.qtdIda2)   || 0,
+    tipoVolta2: r.tipoVolta2 || '', valorVolta2: Number(r.valorVolta2) || 0, qtdVolta2: Number(r.qtdVolta2) || 0,
+    tipoIda3:   r.tipoIda3   || '', valorIda3:   Number(r.valorIda3)   || 0, qtdIda3:   Number(r.qtdIda3)   || 0,
+    tipoVolta3: r.tipoVolta3 || '', valorVolta3: Number(r.valorVolta3) || 0, qtdVolta3: Number(r.qtdVolta3) || 0
+  };
 }
 
 function saveData() {
+  if (autosaveInFlight) { manualSavePending = true; return; }
+  if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+
+  // Salva TODOS os lançamentos do período aberto, visíveis ou não nos filtros atuais —
+  // o state sempre tem os valores digitados, porque syncDomToState roda antes de
+  // qualquer redesenho/troca de filtro. (Antes só as linhas visíveis eram enviadas,
+  // e uma linha escondida por filtro ficava de fora do salvamento.)
+  syncDomToState('admin');
+  syncDomToState('docente');
+  var adminEntries   = state.adminRows.filter(isOpenPeriod).map(entryFromRow);
+  var docenteEntries = state.docenteRows.filter(isOpenPeriod).map(entryFromRow);
+  if (!adminEntries.length && !docenteEntries.length) {
+    setStatus('Nada para salvar: não há lançamentos do período aberto.', 'error');
+    return;
+  }
+
   setStatus('Salvando...', 'saving');
   document.getElementById('saveBtn').disabled = true;
-
-  // Importante: usa os MESMOS índices que renderAdminTable/renderDocenteTable usaram pra desenhar
-  // (rows filtradas), já que as linhas no DOM só existem para o que passou no filtro atual.
-  var adminEntries   = collectEntries(state.adminRows.filter(passesFilter),   document.querySelectorAll('#adminTableBody tr'));
-  var docenteEntries = collectEntries(state.docenteRows.filter(passesFilter), document.querySelectorAll('#docenteTableBody tr'));
+  manualSaveInFlight = true;
 
   google.script.run
     .withSuccessHandler(function() {
+      manualSaveInFlight = false;
       setStatus('Dados salvos com sucesso!', 'success');
       document.getElementById('saveBtn').disabled = false;
       reloadData();
     })
     .withFailureHandler(function(err) {
+      manualSaveInFlight = false;
       setStatus('Erro: ' + (err.message || err), 'error');
       document.getElementById('saveBtn').disabled = false;
+      if (autosavePending) { autosavePending = false; flushAutosave(); }
     })
     .saveVTData({
       token: TOKEN,
@@ -2090,6 +2149,102 @@ function saveData() {
       docente: docenteEntries
     });
 }
+
+// ── AUTOSAVE (salva sozinho ao terminar de editar, sem precisar do botão) ──
+//
+// Cada edição marca a linha como "suja" e agenda um envio; o envio manda SÓ as
+// linhas sujas (não a tabela toda) e não redesenha a tela no meio da digitação.
+// O botão "Salvar dados" continua existindo como reforço/fallback.
+
+var autosaveTimer = null;        // debounce entre a digitação e o envio
+var autosaveInFlight = false;    // um envio por vez; o LockService do servidor cuida do resto
+var autosavePending = false;     // edição chegou durante um envio → reenvia ao terminar
+var manualSavePending = false;   // clique em "Salvar dados" durante um envio → roda depois
+var manualSaveInFlight = false;  // "Salvar dados" em andamento → autosave espera
+
+var AUTOSAVE_DELAY_MS = 2000;
+
+// Descobre a linha do state a partir do input editado e a marca como suja
+function markRowDirty(el) {
+  var tr    = el.closest('tr');
+  var tbody = tr && tr.parentNode;
+  if (!tbody || (tbody.id !== 'adminTableBody' && tbody.id !== 'docenteTableBody')) return;
+  var type = tbody.id === 'adminTableBody' ? 'admin' : 'docente';
+  var idx  = Array.prototype.indexOf.call(tbody.children, tr);
+  var r = findFilteredRow(type, idx);
+  if (!r || !isOpenPeriod(r)) return;
+  syncDomToState(type);
+  r._dirty = true;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(flushAutosave, AUTOSAVE_DELAY_MS);
+}
+
+// change = valor confirmado (saiu do campo / Enter / troca de tipo): salva sem esperar o debounce
+function onVTRowCommitted(el) {
+  onVTRowInput(el);
+  flushAutosave();
+}
+
+function flushAutosave() {
+  if (autosaveTimer) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+  if (autosaveInFlight || manualSaveInFlight) { autosavePending = true; return; }
+  if (state.period.locked) return;
+
+  var dirtyAdmin   = state.adminRows.filter(function(r)   { return r._dirty && isOpenPeriod(r); });
+  var dirtyDocente = state.docenteRows.filter(function(r) { return r._dirty && isOpenPeriod(r); });
+  if (!dirtyAdmin.length && !dirtyDocente.length) return;
+
+  // Limpa a marca já no envio: se a pessoa editar de novo durante a viagem,
+  // a linha volta a ficar suja e entra no próximo envio
+  var dirty = dirtyAdmin.concat(dirtyDocente);
+  dirty.forEach(function(r) { r._dirty = false; });
+  autosaveInFlight = true;
+  setStatus('Salvando automaticamente...', 'saving');
+
+  google.script.run
+    .withSuccessHandler(function() {
+      autosaveInFlight = false;
+      dirty.forEach(function(r) { r._new = false; }); // linha nova agora existe na planilha (💬 habilita no próximo redesenho)
+      var agora = new Date();
+      setStatus('Alterações salvas automaticamente às ' + pad2(agora.getHours()) + ':' + pad2(agora.getMinutes()) + ' ✓', 'success');
+      refreshTablesIfIdle();
+      if (manualSavePending) { manualSavePending = false; saveData(); return; }
+      if (autosavePending) { autosavePending = false; flushAutosave(); }
+    })
+    .withFailureHandler(function(err) {
+      autosaveInFlight = false;
+      autosavePending = false;
+      dirty.forEach(function(r) { r._dirty = true; }); // nada se perdeu: continua na tela e tenta de novo
+      setStatus('Erro ao salvar automaticamente: ' + (err.message || err) + ' — suas alterações continuam na tela; clique em "Salvar dados".', 'error');
+      if (manualSavePending) { manualSavePending = false; saveData(); }
+    })
+    .saveVTData({
+      token: TOKEN,
+      administrativo: dirtyAdmin.map(entryFromRow),
+      docente: dirtyDocente.map(entryFromRow)
+    });
+}
+
+// Redesenha as tabelas (habilita 💬 de linha recém-salva etc.) só quando o foco
+// não está num campo delas — nunca no meio da digitação
+function refreshTablesIfIdle() {
+  var ae = document.activeElement;
+  var adminBody   = document.getElementById('adminTableBody');
+  var docenteBody = document.getElementById('docenteTableBody');
+  if (ae && ((adminBody && adminBody.contains(ae)) || (docenteBody && docenteBody.contains(ae)))) return;
+  syncDomToState('admin');
+  syncDomToState('docente');
+  renderAdminTable();
+  renderDocenteTable();
+}
+
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+// Última rede de proteção: avisa antes de fechar a aba com edição ainda não enviada
+window.addEventListener('beforeunload', function(e) {
+  var temSuja = state.adminRows.concat(state.docenteRows).some(function(r) { return r._dirty; });
+  if (temSuja || autosaveInFlight) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // Recarrega os dados após salvar, para refletir o estado real da planilha
 function reloadData() {
