@@ -1594,8 +1594,14 @@ function populateAddEmpDropdown(type) {
     return;
   }
   empSel.disabled  = false;
+  // O value é a POSIÇÃO no cadastro, não a matrícula: funcionário recém-admitido costuma
+  // vir com matrícula placeholder ("-") e, com duas iguais na mesma unidade, escolher o
+  // segundo acabava adicionando o primeiro de novo (a busca por matrícula pegava o 1º).
+  var cadastro = isAdmin ? state.funcs.administrativo : state.funcs.docente;
   empSel.innerHTML = '<option value="">— Selecione o funcionário —</option>' +
-    emps.map(function(e) { return '<option value="' + esc(e.matricula) + '">' + esc(e.nome) + '</option>'; }).join('');
+    emps.map(function(e) {
+      return '<option value="' + cadastro.indexOf(e) + '">' + esc(e.nome) + '</option>';
+    }).join('');
 }
 
 function addRow(type) {
@@ -1603,17 +1609,28 @@ function addRow(type) {
   var unitSel = document.getElementById(isAdmin ? 'adminAddUnit' : 'docenteAddUnit');
   var empSel  = document.getElementById(isAdmin ? 'adminAddEmp'  : 'docenteAddEmp');
   var unidade = unitSel.value;
-  var mat     = empSel.value;
-  if (!unidade || !mat) return;
+  var escolha = empSel.value;
+  if (!unidade || escolha === '') return;
 
   var emps = isAdmin ? state.funcs.administrativo : state.funcs.docente;
-  var emp  = emps.filter(function(e) { return e.matricula === mat && normStr(e.unidade) === normStr(unidade); })[0];
-  if (!emp) return;
-
-  syncDomToState(type); // o redesenho abaixo não pode apagar valores digitados e não salvos
+  var emp  = emps[Number(escolha)];
+  if (!emp || normStr(emp.unidade) !== normStr(unidade)) return;
 
   var target = state.period.previsto;
   var rows   = isAdmin ? state.adminRows : state.docenteRows;
+
+  // Rede de segurança: nunca duplica o mesmo funcionário no mês (o dropdown já
+  // esconde quem foi lançado, mas uma lista desatualizada não pode virar linha repetida)
+  var jaLancado = rows.some(function(r) {
+    return isSamePeriod(r, target) && normStr(r.unidade) === normStr(unidade) && normStr(r.nome) === normStr(emp.nome);
+  });
+  if (jaLancado) {
+    populateAddEmpDropdown(type);
+    setStatus(emp.nome + ' já está lançado(a) em ' + MESES[target.mes - 1] + ' / ' + target.ano + '.', 'error');
+    return;
+  }
+
+  syncDomToState(type); // o redesenho abaixo não pode apagar valores digitados e não salvos
 
   rows.push({
     unidade: unidade, mes: target.mes, ano: target.ano, matricula: emp.matricula, cpf: emp.cpf || '', nome: emp.nome,
