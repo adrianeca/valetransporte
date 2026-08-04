@@ -1643,14 +1643,16 @@ function addRow(type) {
     tipoIda2: '', valorIda2: 0, qtdIda2: 0, tipoVolta2: '', valorVolta2: 0, qtdVolta2: 0,
     tipoIda3: '', valorIda3: 0, qtdIda3: 0, tipoVolta3: '', valorVolta3: 0, qtdVolta3: 0,
     total: 0, diasTrabalhados: 0, valorDiario: 0, valorJae: 0, valorRiocard: 0,
-    _new: true, _keepVisible: true
+    _new: true, _keepVisible: true,
+    _dirty: true // adicionar já grava a pessoa na planilha, mesmo com os trechos zerados
   });
 
   rows.sort(function(a, b) { return (a.ano - b.ano) || (a.mes - b.mes) || a.unidade.localeCompare(b.unidade, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'); });
 
   if (isAdmin) renderAdminTable(); else renderDocenteTable();
   renderFilterBar(); // o ano da linha nova (ex.: janeiro lançado em dezembro) entra nas opções de filtro
-  setStatus(emp.nome + ' adicionado(a) em ' + MESES[target.mes - 1] + ' / ' + target.ano + ' — preencha os trechos.', 'success');
+  setStatus(emp.nome + ' adicionado(a) em ' + MESES[target.mes - 1] + ' / ' + target.ano + ' — salvando...', 'saving');
+  flushAutosave();
 }
 
 // ── EXCLUIR LANÇAMENTO (só do período aberto) ──────────────────

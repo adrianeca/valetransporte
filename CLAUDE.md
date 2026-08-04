@@ -59,7 +59,7 @@ O front-end abria com 5 `google.script.run` em sequência (usuário → unidades
 - **Salvar manual envia o período aberto INTEIRO** (state, não DOM filtrado) — linha escondida por filtro com edição pendente também é salva.
 - **Opções de filtro atualizam ao adicionar/copiar**: `renderFilterBar()` roda de novo após "+ Adicionar"/"Copiar mês anterior" (o ano da linha nova só entrava no filtro depois de recarregar).
 - **"+ Adicionar" identifica o funcionário pela POSIÇÃO no cadastro, nunca pela matrícula** (`value` = `indexOf(e)`): com duas matrículas placeholder ("-") iguais na unidade, escolher o segundo funcionário adicionava o primeiro de novo. Mesma correção feita no Horas e no VR.
-- **"Copiar mês anterior" já salva sozinho**: linhas copiadas nascem `_dirty` + `flushAutosave()` na sequência — copiar sem editar nada não salvava, pois o autosave só disparava em edição de campo. O "+ Adicionar" continua salvando só a partir da primeira digitação (linha zerada abandonada não vira lançamento).
+- **"Copiar mês anterior" e "+ Adicionar" já salvam sozinhos**: as linhas nascem `_dirty` + `flushAutosave()` na sequência — antes o autosave só disparava em edição de campo, então copiar/adicionar sem digitar nada não gravava. Consequência aceita: pessoa adicionada e deixada zerada **vira lançamento na planilha** (e conta como unidade preenchida nos lembretes) — para desfazer, usar a lixeira da linha.
 - **Opções de filtro atualizam ao adicionar/copiar**: `renderFilterBar()` roda de novo após "+ Adicionar"/"Copiar mês anterior" (o ano da linha nova — ex.: janeiro lançado em dezembro — só entrava no filtro de ano depois de recarregar).
 
 ## Período e bloqueio
