@@ -96,6 +96,20 @@ function canonUnidade_(u) {
   return alias || u;
 }
 
+// Uma célula pode listar mais de uma unidade, e cada fonte usa um separador
+// diferente: o Hub grava vírgula ("PO, PN"), o cadastro de funcionários usa barra
+// ("EC NEW/VQ") e a documentação antiga do SESSOES falava em pipe ("BG|FG").
+// Aceita todos — nenhum código de unidade contém / , ; ou |.
+// Retorna array de nomes canônicos individuais, sem duplicatas.
+function parseRawUnidades_(raw) {
+  const parts = [];
+  String(raw || '').split(/[\/,;|]/).forEach(function(p) {
+    const u = canonUnidade_(p.trim());
+    if (u && parts.indexOf(u) === -1) parts.push(u);
+  });
+  return parts;
+}
+
 // Extrai o número do mês mesmo quando a célula guarda texto como "06 Junho" (em vez de 6)
 // Aceita também DATA de verdade: o appendRow interpretava "08 Agosto" como digitação
 // e convertia a célula em data — a linha então "sumia" do app porque parseInt dava NaN.
@@ -228,7 +242,7 @@ function doGet(e) {
 // =============================================================================
 
 // Colunas SESSOES: TOKEN(0)|EMAIL(1)|NOME(2)|ROLE(3)|UNIDADE(4)|CRIADO_EM(5)|EXPIRA_EM(6)|ACESSOS(7)
-// UNIDADE pode ser pipe-separado (ex: "BG|FG"). Vazio = acesso a todas.
+// UNIDADE pode listar várias unidades (ex.: "PO, PN"). Vazio = acesso a todas.
 
 function getUserFromHub(token) {
   if (!token) throw new Error('Token não fornecido.');
@@ -266,11 +280,10 @@ function getSessionUser_(token) {
       throw new Error('Você não tem permissão para acessar o Vale Transporte. Contacte o administrador.');
     }
 
-    // UNIDADE: vazio = todas; pipe-separado = restringe a essas
-    const unidadeRaw = String(row[4] || '').trim();
-    const units = unidadeRaw
-      ? unidadeRaw.split('|').map(function(u) { return canonUnidade_(u); }).filter(Boolean)
-      : [];
+    // UNIDADE: vazio = todas; uma ou mais unidades = restringe a essas.
+    // O Hub grava múltiplas unidades separadas por vírgula ("PO, PN"); o
+    // parseRawUnidades_ também aceita | ; e / por segurança.
+    const units = parseRawUnidades_(row[4]);
 
     return {
       email:    email,
@@ -288,9 +301,9 @@ function getSessionUser_(token) {
 
 function isUserAllowedUnit_(user, unit) {
   if (!user.units || !user.units.length) return true; // acesso total
-  return user.units.some(function(u) {
-    return u.toLowerCase().trim() === unit.toLowerCase().trim();
-  });
+  // norm_ (e não toLowerCase) para bater com o resto do app em unidade acentuada
+  const alvo = norm_(unit);
+  return user.units.some(function(u) { return norm_(u) === alvo; });
 }
 
 // Todas as unidades que o usuário pode ver: as dele (se restrito) ou todas que existem
