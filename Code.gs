@@ -43,6 +43,14 @@ function isSemRateio_(unidade) {
   return UNIDADES_SEM_RATEIO.some(function(u) { return norm_(u) === norm_(unidade); });
 }
 
+// Unidades que não têm Vale Transporte de forma alguma (não aparecem no app,
+// não recebem lembrete, não contam como pendentes). Ex.: ONLINE.
+const UNIDADES_SEM_VT = ['ONLINE'];
+
+function isSemVT_(unidade) {
+  return UNIDADES_SEM_VT.some(function(u) { return norm_(u) === norm_(unidade); });
+}
+
 // Índices das colunas na planilha de funcionários (base 0)
 const COL = {
   NOME:         2,   // C
@@ -322,7 +330,7 @@ function getAllowedUnidades_(user, funcRows, vtRows) {
       if (!nome) continue;
       if (isInativo_(funcRows[i][COL.ATIVO])) continue;
       const u = canonUnidade_(funcRows[i][COL.UNIDADE]);
-      if (u) set[u] = true;
+      if (u && !isSemVT_(u)) set[u] = true;
     }
 
     vtRows = vtRows || readVtRows_();
@@ -330,7 +338,7 @@ function getAllowedUnidades_(user, funcRows, vtRows) {
       const rows = vtRows[sheetName];
       for (let i = 1; i < rows.length; i++) {
         const u = canonUnidade_(rows[i][0]);
-        if (u) set[u] = true;
+        if (u && !isSemVT_(u)) set[u] = true;
       }
     });
   }
@@ -1491,7 +1499,7 @@ const DIRETORES_UNIDADE = {
   'vp':     ['dirvp@brasas.com'],
   'vq':     ['dirvq@brasas.com'],
   'pn':     ['dirpn@brasas.com'],
-  'online': ['natasha@brasas.com'],
+  // ONLINE não tem Vale Transporte (ver UNIDADES_SEM_VT) — não recebe lembrete.
   'bod':    ['pat@brasas.com'],
   'gr':     ['dirgr@brasas.com'],
   'vo':     ['dirvo@brasas.com']
@@ -1529,7 +1537,7 @@ function getUnidadesAtivas_() {
     if (!nome) continue;
     if (isInativo_(rows[i][COL.ATIVO])) continue;
     const u = canonUnidade_(rows[i][COL.UNIDADE]);
-    if (u) set[u] = true;
+    if (u && !isSemVT_(u)) set[u] = true;
   }
   return Object.keys(set);
 }
