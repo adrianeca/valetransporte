@@ -221,11 +221,19 @@ input[type=number]:disabled {
   font-size:.82rem;font-weight:600;margin-right:auto;
 }
 
+/* STICKY NAV BAR (tabs + filtros colados abaixo do header ao rolar) */
+.sticky-nav-bar {
+  position:sticky;
+  top:68px;
+  z-index:90;
+  background:var(--gray-100);
+  padding-bottom:18px;
+}
 /* FILTER CARD (card branco independente, acima das pills e da tabela) */
 .filter-card {
   background:var(--white);border:1px solid var(--gray-200);
   border-radius:var(--radius);padding:18px 20px;
-  margin-bottom:18px;box-shadow:var(--shadow-sm);
+  margin-bottom:0;box-shadow:var(--shadow-md);
 }
 .filter-row {display:flex;gap:28px;flex-wrap:wrap;align-items:center}
 .filter-actions {margin-left:auto;display:flex;gap:10px;align-items:center}
@@ -491,7 +499,8 @@ input[type=number]:disabled {
 
   <div class="app-body">
 
-    <!-- Seletor de visão -->
+    <!-- Seletor de visão + filtros (sticky: ficam visíveis ao rolar) -->
+    <div class="sticky-nav-bar">
     <div class="tabs-nav">
       <button class="tab-btn active" data-tab="admin" onclick="switchTab('admin')">Administrativo</button>
       <button class="tab-btn" data-tab="docente" onclick="switchTab('docente')">Docente</button>
@@ -548,6 +557,7 @@ input[type=number]:disabled {
         </div>
       </div>
     </div>
+    </div><!-- /sticky-nav-bar -->
 
     <!-- Stat pills -->
     <div class="stat-row">
@@ -1771,9 +1781,13 @@ function deleteRow(type, idx) {
 
   setStatus('Excluindo...', 'saving');
   google.script.run
-    .withSuccessHandler(function() {
+    .withSuccessHandler(function(res) {
       removeAndRender();
-      setStatus('Lançamento excluído com sucesso!', 'success');
+      // Duplicata: o back-end apaga uma linha por clique — avisa quantas ainda sobraram
+      var restantes = res && res.duplicadasRestantes;
+      setStatus('Lançamento excluído com sucesso!' +
+        (restantes ? ' Ainda há ' + restantes + ' linha(s) duplicada(s) desta pessoa — exclua de novo para remover.' : ''),
+        'success');
     })
     .withFailureHandler(function(err) {
       setStatus('Erro: ' + (err.message || err), 'error');

@@ -52,11 +52,35 @@ O front-end abria com 5 `google.script.run` em sequência (usuário → unidades
 - `LockService` em `saveVTData` (dois salvamentos simultâneos criariam linhas duplicadas), e linha nova gravada com `setValues`, nunca `appendRow` — o `appendRow` interpreta os valores como digitação e converte "08 Agosto" em DATA, fazendo a linha sumir do app; `parseMes_()` também passou a aceitar `Date` para ler linhas já estragadas.
 - No front-end, todo casamento lançamento↔cadastro é por unidade+nome: `copyableEntries`, `populateAddEmpDropdown` e `rowKey_`. `deleteVTEntry`/`salvarComentarioVT` recebem `nome` no payload.
 
+### Duplicação por falta de flush (06/08/2026)
+
+`saveVTData` usa `LockService`, mas soltava a trava **sem `SpreadsheetApp.flush()`**: as escritas ficavam pendentes, o salvamento seguinte pegava a trava, lia a planilha ainda sem a linha recém-criada e criava uma segunda linha para a mesma pessoa. Com o autosave de 2 em 2s isso duplicou lançamentos inteiros (relatado 06/08/2026 no VR). O `flush()` agora roda dentro do `try`, antes do `releaseLock()` — **mesma correção aplicada em VR e Horas**.
+
+- `deleteVTEntry` deixou de recusar quando há duplicata: apaga **uma** linha por chamada, escolhendo por `escolherLinhaParaExcluir_()` a última **zerada** (se todas tiverem valores, a última da planilha), para nunca levar junto a linha preenchida. Devolve `duplicadasRestantes` e o front-end avisa quantas faltam. `saveVTData`/`salvarComentarioVT` continuam recusando com erro — ali gravar em linha imprevisível corromperia dados.
+- `limparLancamentosDuplicados(mes, ano)` limpa um mês inteiro no editor do Apps Script: sem o terceiro argumento só simula; com `true` apaga. Mantém a primeira linha e só apaga repetidas **idênticas**; valores diferentes entre as cópias → não apaga nada e avisa.
+
+### Professor que lança como ADMINISTRATIVO (06/08/2026)
+
+`FORCA_ADMINISTRATIVO_` (topo do `Code.gs`) mapeia **nome → unidade** e sobrepõe a função do cadastro: quem está nele cai no `administrativo` mesmo com FUNÇÃO = PROFESSOR, **e só na unidade indicada**. Hoje: **Carolina Miguel das Chagas → TJ** e **Juliana Machado de Lima Oliveira → PN** — o mesmo mapa existe no VR. Ponto único de decisão em `funcionariosFromRows_`.
+
+- A unidade é fixada de propósito: o cadastro ainda traz unidades antigas delas (Juliana como "PO/PN", Carolina em TJ e NL) e sem isso apareceriam para diretor de unidade que não lança mais o VT delas. Se a unidade do mapa não estiver entre as do cadastro, a pessoa **some de todo lugar** — `diagnosticoCategoriaForcada()` avisa exatamente isso.
+- Só muda onde ela **passa a** lançar: os lançamentos que já estão na aba DOCENTE continuam lá (as duas abas têm colunas diferentes, não há migração automática).
+- Casamento por nome completo exato via `normNome_` (ignora acento/caixa/espaço duplo) — grafia diferente na coluna C do cadastro faz a exceção não valer em silêncio. `diagnosticoCategoriaForcada()` confere isso contra o cadastro real e avisa o nome que não casou.
+- Ficou no código porque são poucos casos (decisão da Adriane). Se a lista crescer, migrar para uma coluna do cadastro (serviria VR e VT de uma vez) ou uma aba da planilha, para não precisar de deploy a cada mudança.
+
+### Matrícula não é critério de entrada (06/08/2026 — portado do Horas)
+
+`funcionariosFromRows_` não descarta mais quem está sem matrícula (col. AB) no cadastro: funcionário ativo aparece no "+ Adicionar" mesmo assim e a coluna D do lançamento fica em branco até o DP preencher. Consequência direta de a chave já ser por nome — nada mais depende da matrícula para identificar a linha.
+
+- `buildEcLinkedSet_` passou a indexar **também por nome|unidade** (`ecLinkedNomeKey_`), e `vtDataFromRows_` casa por matrícula **ou** nome: com a matrícula em branco, a chave antiga não reconheceria a linha e o lançamento de um EC-linked ficaria visível para o diretor.
+- Aprendiz no VR ganha o prefixo "JA - " só quando tem matrícula (senão gravaria um "JA - " solto); o VT não tem essa regra.
+
 ## Autosave e filtros (08/2026 — padrão espelhado do Horas)
 
 - **Autosave**: `onVTRowInput` (que já recalculava o total ao vivo) agora também marca a linha como suja (`markRowDirty`, debounce de 2s); `onVTRowCommitted` (no `change` — sair do campo/Enter/troca de tipo) envia na hora. `addLeg`/`removeLeg` também disparam. `flushAutosave` manda **só as linhas sujas** pro `saveVTData` e não redesenha as tabelas durante a digitação (`refreshTablesIfIdle`). Um envio por vez; falha devolve o `_dirty` e orienta a usar o botão "Salvar dados", que continua como fallback. `beforeunload` avisa se há edição não enviada.
 - **Filtros preservam o que foi digitado**: `syncBeforeFilterChange()` (sync das duas tabelas + `clearKeepVisible`) roda antes de qualquer mudança de filtro — antes disso, trocar filtro APAGAVA valores digitados e não salvos (correção que o Horas já tinha e o VT não).
-- **Linhas novas furam os filtros**: `passesFilter` deixa passar `_new`/`_keepVisible` — com filtro de mês ativo, a linha do "+ Adicionar"/"Copiar mês anterior" sumia da tela e ficava fora do salvamento. `_keepVisible` sobrevive ao salvar+recarregar (reaplicado por chave unidade+mês+ano+matrícula em `onVTLoaded`) e é limpo ao mexer em qualquer filtro.
+- **Linhas novas furam os filtros**: `passesFilter` deixa passar `_new`/`_keepVisible` — com filtro de mês ativo, a linha do "+ Adicionar"/"Copiar mês anterior" sumia da tela e ficava fora do salvamento. `_keepVisible` sobrevive ao salvar+recarregar (reaplicado por chave unidade+mês+ano+nome — `rowKey_` — em `onVTLoaded`) e é limpo ao mexer em qualquer filtro.
+- **Barra de filtros fixa ao rolar** (06/08/2026): pills + `.filter-card` dentro de `.sticky-nav-bar` (`position:sticky; top:68px` = altura do `.app-header`; `z-index:90` contra o `100` do header, fundo `--gray-100` pra tabela não aparecer atrás). Mesmo bloco de CSS/markup do VR e do Horas.
 - **Salvar manual envia o período aberto INTEIRO** (state, não DOM filtrado) — linha escondida por filtro com edição pendente também é salva.
 - **Opções de filtro atualizam ao adicionar/copiar**: `renderFilterBar()` roda de novo após "+ Adicionar"/"Copiar mês anterior" (o ano da linha nova só entrava no filtro depois de recarregar).
 - **"+ Adicionar" identifica o funcionário pela POSIÇÃO no cadastro, nunca pela matrícula** (`value` = `indexOf(e)`): com duas matrículas placeholder ("-") iguais na unidade, escolher o segundo funcionário adicionava o primeiro de novo. Mesma correção feita no Horas e no VR.

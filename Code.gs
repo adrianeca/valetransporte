@@ -93,6 +93,128 @@ function norm_(s) {
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+// Nome do cadastro costuma vir com espaço sobrando entre os sobrenomes — além do
+// norm_ (caixa/acento/bordas), colapsa os espaços internos.
+function normNome_(s) {
+  return norm_(s).replace(/\s+/g, ' ');
+}
+
+// =============================================================================
+// EXCEÇÕES DE CATEGORIA — quem tem FUNÇÃO = PROFESSOR mas lança no ADMINISTRATIVO
+// Pedido da Adriane (06/08/2026). Mantido no código enquanto são poucos casos; se
+// a lista crescer, migrar para uma coluna do cadastro (vale VR e VT de uma vez) ou
+// para uma aba da planilha, pra não precisar de deploy a cada mudança.
+// Cada uma é presa a UMA unidade: o cadastro ainda lista outras unidades antigas
+// (Juliana como "PO/PN", Carolina em TJ e NL) e sem isso a pessoa apareceria pra
+// diretor de unidade que não lança mais o VT dela. Só muda onde ela lança daqui
+// pra frente — lançamento antigo continua na aba DOCENTE onde já está.
+// A mesma lista existe no webapp de VR.
+// =============================================================================
+const FORCA_ADMINISTRATIVO_ = {
+  'CAROLINA MIGUEL DAS CHAGAS':       'TJ',
+  'JULIANA MACHADO DE LIMA OLIVEIRA': 'PN'
+};
+
+// Unidade em que a pessoa deve lançar como administrativo, ou '' se não é exceção
+function unidadeAdministrativoForcada_(nome) {
+  const n = normNome_(nome);
+  if (!n) return '';
+  const chave = Object.keys(FORCA_ADMINISTRATIVO_).filter(function(x) { return normNome_(x) === n; })[0];
+  return chave ? canonUnidade_(FORCA_ADMINISTRATIVO_[chave]) : '';
+}
+
+// Confere FORCA_ADMINISTRATIVO_ contra o cadastro real (editor do Apps Script):
+// mostra em que unidades cada pessoa passa a lançar e avisa se algum nome não casou —
+// grafia diferente na coluna C faz a exceção não valer, sem nenhum aviso na tela.
+// Só lê e loga; não envia e-mail nem escreve em planilha.
+function diagnosticoCategoriaForcada() {
+  const rows = readFuncRows_();
+  const achados = {};
+
+  for (let i = 1; i < rows.length; i++) {
+    const nome = String(rows[i][COL.NOME] || '').trim();
+    const forcada = unidadeAdministrativoForcada_(nome);
+    if (!forcada) continue;
+    achados[normNome_(nome)] = true;
+    const unidades = parseRawUnidades_(rows[i][COL.UNIDADE])
+      .concat(parseRawUnidades_(rows[i][COL.UNIDADE_SEC]));
+    Logger.log('linha %s: "%s" | função="%s" | ativo="%s" | unidades no cadastro=%s → lança no ADMINISTRATIVO de %s',
+      i + 1, nome, rows[i][COL.FUNCAO], rows[i][COL.ATIVO], unidades.join(', ') || '(nenhuma)', forcada);
+    if (unidades.map(norm_).indexOf(norm_(forcada)) === -1) {
+      Logger.log('  ATENÇÃO: "%s" não é uma das unidades dela no cadastro — ela NÃO vai aparecer em ' +
+        'lugar nenhum. Ajuste a unidade em FORCA_ADMINISTRATIVO_ ou o cadastro.', forcada);
+    }
+  }
+
+  Object.keys(FORCA_ADMINISTRATIVO_).forEach(function(n) {
+    if (!achados[normNome_(n)]) {
+      Logger.log('ATENÇÃO: "%s" não casou com nenhum nome da coluna C do cadastro — confira a grafia. ' +
+        'Sem casar, a pessoa continua aparecendo no DOCENTE.', n);
+    }
+  });
+}
+
+// =============================================================================
+// LIMPEZA DAS DUPLICATAS já gravadas antes da correção do SpreadsheetApp.flush()
+// Rodar no editor do Apps Script:
+//   limparLancamentosDuplicados(9, 2026)        → só LISTA o que faria (nada muda)
+//   limparLancamentosDuplicados(9, 2026, true)  → apaga de verdade
+// Mantém a PRIMEIRA linha de cada pessoa e apaga as repetidas. Se as repetidas
+// tiverem valores diferentes entre si, não apaga nenhuma daquela pessoa e avisa —
+// aí alguém precisa olhar qual está certa antes.
+// =============================================================================
+function limparLancamentosDuplicados(mes, ano, executar) {
+  if (!mes || !ano) {
+    Logger.log('Informe mês e ano: limparLancamentosDuplicados(9, 2026) lista; ' +
+      'limparLancamentosDuplicados(9, 2026, true) apaga.');
+    return;
+  }
+  Logger.log(executar ? '=== APAGANDO duplicatas de %s/%s ===' : '=== SIMULAÇÃO (nada será apagado) — %s/%s ===', mes, ano);
+
+  const ss = SpreadsheetApp.openById(VT_SHEET_ID);
+  ['ADMINISTRATIVO', 'DOCENTE'].forEach(function(sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    const rows   = sheet.getDataRange().getValues();
+    const grupos = {};
+    for (let i = 1; i < rows.length; i++) {
+      if (parseMes_(rows[i][1]) !== Number(mes) || Number(rows[i][2]) !== Number(ano)) continue;
+      const k = chaveVTRow_(rows[i]);
+      (grupos[k] = grupos[k] || []).push(i);
+    }
+
+    const apagar = [];
+    Object.keys(grupos).forEach(function(k) {
+      const idxs = grupos[k];
+      if (idxs.length < 2) return;
+
+      // Trechos + calculados: col. G (índice 6) até Valor Total RioCard
+      const assinatura = function(i) { return rows[i].slice(6, 29).map(function(v) { return String(v == null ? '' : v); }).join('|'); };
+      const base = assinatura(idxs[0]);
+      const iguais = idxs.every(function(i) { return assinatura(i) === base; });
+
+      const nome = String(rows[idxs[0]][5]).trim(), unidade = String(rows[idxs[0]][0]).trim();
+      if (!iguais) {
+        Logger.log('  [%s] %s (%s): %s linhas com VALORES DIFERENTES — nenhuma apagada, confira nas linhas %s',
+          sheetName, nome, unidade, idxs.length, idxs.map(function(i) { return i + 1; }).join(', '));
+        return;
+      }
+      idxs.slice(1).forEach(function(i) { apagar.push(i); });
+      Logger.log('  [%s] %s (%s): %s linhas idênticas — mantém a linha %s, apaga %s',
+        sheetName, nome, unidade, idxs.length, idxs[0] + 1,
+        idxs.slice(1).map(function(i) { return i + 1; }).join(', '));
+    });
+
+    if (executar && apagar.length) {
+      // De baixo pra cima: apagar de cima desloca os índices das linhas seguintes
+      apagar.sort(function(a, b) { return b - a; }).forEach(function(i) { sheet.deleteRow(i + 1); });
+      SpreadsheetApp.flush();
+    }
+    Logger.log('[%s] %s linha(s) %s.', sheetName, apagar.length, executar ? 'apagada(s)' : 'seriam apagadas');
+  });
+}
+
 // Algumas fontes (Hub, lançamentos antigos) chamam a mesma unidade de "NS" (na
 // verdade CH) ou "MRI" (na verdade MR). Toda unidade crua deve passar por aqui
 // assim que é lida, pra não duplicar a unidade em listas/filtros/lembretes.
@@ -211,14 +333,18 @@ function readVtRows_() {
 
 // Funcionários com EC NEW + outra unidade só aparecem para DP/admin, e nunca sob EC NEW.
 // Chave composta mat|unidade evita falsos positivos com matrículas duplicadas.
+// Indexa TAMBÉM por nome|unidade: desde que a matrícula deixou de ser obrigatória
+// (06/08/2026), existe lançamento com a coluna de matrícula em branco, e só a chave
+// por matrícula deixaria essa linha visível para o diretor.
 // funcRows é opcional: quando o chamador já leu a planilha, reaproveita.
 function buildEcLinkedSet_(funcRows) {
   const set  = {};
   const rows = funcRows || readFuncRows_();
   for (let i = 1; i < rows.length; i++) {
     if (isInativo_(rows[i][COL.ATIVO])) continue;
-    const mat = String(rows[i][COL.MATRICULA]).trim();
-    if (!mat || mat === '-') continue;
+    const mat  = String(rows[i][COL.MATRICULA] || '').trim();
+    const nome = String(rows[i][COL.NOME] || '').trim();
+    if (!nome) continue;
     const unidades = [canonUnidade_(rows[i][COL.UNIDADE]), canonUnidade_(rows[i][COL.UNIDADE_SEC])]
       .filter(function(u) { return u; });
     const hasEcNew = unidades.some(function(u) { return norm_(u) === 'ec new'; });
@@ -226,10 +352,17 @@ function buildEcLinkedSet_(funcRows) {
     const nonEcUnits = unidades.filter(function(u) { return norm_(u) !== 'ec new'; });
     if (!nonEcUnits.length) continue;
     nonEcUnits.forEach(function(u) {
-      set[normMat_(mat) + '|' + norm_(u)] = true;
+      // "-" e vazio não identificam ninguém — só o nome entra nesses casos
+      if (mat && mat !== '-') set[normMat_(mat) + '|' + norm_(u)] = true;
+      set[ecLinkedNomeKey_(nome, u)] = true;
     });
   }
   return set;
+}
+
+// Prefixo "nome|" pra não colidir com as chaves por matrícula no mesmo objeto
+function ecLinkedNomeKey_(nome, unidade) {
+  return 'nome|' + norm_(nome) + '|' + norm_(unidade);
 }
 
 // =============================================================================
@@ -890,16 +1023,26 @@ function funcionariosFromRows_(allowedNorm, dpOrAdmin, rows) {
 
     if (isInativo_(row[COL.ATIVO])) continue;
 
-    const matricula = String(row[COL.MATRICULA]).trim();
-    if (!matricula) continue;
+    // Matrícula NÃO é critério de entrada (06/08/2026, portado do webapp de Horas):
+    // funcionário recém-admitido fica semanas sem matrícula no cadastro e sumia do
+    // "+ Adicionar". Fica em branco no lançamento — a chave é unidade+mês+ano+nome.
+    const matricula = String(row[COL.MATRICULA] || '').trim();
 
     const cpf    = String(row[COL.CPF] || '').trim();
     const funcao = String(row[COL.FUNCAO]).trim().toUpperCase();
-    const list   = funcao === 'PROFESSOR' ? docente : administrativo;
+    // Professor da lista de exceção entra no ADMINISTRATIVO, e só na unidade em que
+    // ele foi fixado — as outras unidades do cadastro dele são ignoradas.
+    const unidadeForcada = unidadeAdministrativoForcada_(nome);
+    const list = (funcao === 'PROFESSOR' && !unidadeForcada) ? docente : administrativo;
 
     // Unidade principal + secundária, sem repetir se forem iguais
-    const unidades = [canonUnidade_(row[COL.UNIDADE]), canonUnidade_(row[COL.UNIDADE_SEC])]
+    let unidades = [canonUnidade_(row[COL.UNIDADE]), canonUnidade_(row[COL.UNIDADE_SEC])]
       .filter(function(u, idx, arr) { return u && arr.indexOf(u) === idx; });
+
+    // Exceção fixada numa unidade: descarta as outras unidades do cadastro dela
+    if (unidadeForcada) {
+      unidades = unidades.filter(function(u) { return norm_(u) === norm_(unidadeForcada); });
+    }
 
     const hasEcNew   = unidades.some(function(u) { return norm_(u) === 'ec new'; });
     const hasOther   = unidades.some(function(u) { return norm_(u) !== 'ec new'; });
@@ -1080,8 +1223,11 @@ function vtDataFromRows_(allowedNorm, ecLinkedSet, dpOrAdmin, vtRows) {
       if (allowedNorm.indexOf(norm_(unidade)) === -1) continue;
       const mes = parseMes_(r[1]), ano = Number(r[2]);
       if (!mes || !ano) continue;
-      const mat = String(r[3]).trim();
-      if (norm_(unidade) !== 'ec new' && ecLinkedSet[normMat_(mat) + '|' + norm_(unidade)]) {
+      const mat  = String(r[3]).trim();
+      const nomeR = String(r[5]).trim();
+      // Casa por matrícula OU por nome — a linha pode ter sido gravada sem matrícula
+      if (norm_(unidade) !== 'ec new' &&
+          (ecLinkedSet[normMat_(mat) + '|' + norm_(unidade)] || ecLinkedSet[ecLinkedNomeKey_(nomeR, unidade)])) {
         if (!dpOrAdmin) continue;
       }
       out.push({
@@ -1171,6 +1317,12 @@ function saveVTData(payload) {
   try {
     ambiguos = _upsertRows_(adminSheet, adminEntries, valuesFn, user.email, forcedByLiberacao)
       .concat(_upsertRows_(docenteSheet, docenteEntries, valuesFn, user.email, forcedByLiberacao));
+
+    // Confirma a gravação ANTES de soltar a trava. Sem isso as escritas ficam
+    // pendentes: o próximo salvamento pega a trava, lê a planilha ainda sem as
+    // linhas recém-criadas e cria uma SEGUNDA linha para a mesma pessoa — foi o
+    // que duplicou lançamentos inteiros com o autosave disparando de 2 em 2s.
+    SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
   }
@@ -1261,7 +1413,7 @@ function _upsertRows_(sheet, entries, valuesFn, editorEmail, forcedByLiberacao) 
 
   const ambiguos = [];
   entries.forEach(function(e) {
-    const mat    = String(e.matricula).trim();
+    const mat    = String(e.matricula || '').trim();  // pode ser vazia: funcionário sem matrícula no cadastro
     const key    = chaveVT_(e.unidade, e.mes, e.ano, e.nome);
     const values = valuesFn(e);
 
@@ -1451,15 +1603,36 @@ function deleteVTEntry(payload) {
   const key  = chaveVT_(payload.unidade, payload.mes, payload.ano, payload.nome);
   const rows = sheet.getDataRange().getValues();
 
-  let rowIdx = 0, matches = 0;
+  const achadas = [];
   for (let i = 1; i < rows.length; i++) {
-    if (chaveVTRow_(rows[i]) === key) { rowIdx = i + 1; matches++; }
+    if (chaveVTRow_(rows[i]) === key) achadas.push(i);
   }
-  if (matches > 1) throw new Error('Há mais de uma linha na planilha para esta pessoa neste mês. Peça ao DP para corrigir a planilha antes de excluir.');
-  if (rowIdx) sheet.deleteRow(rowIdx);
-
   // Linha não encontrada = provavelmente nunca foi salva — nada a fazer
-  return { success: true };
+  if (!achadas.length) return { success: true, deleted: false };
+
+  // Duplicata na planilha (criada por salvamentos simultâneos, antes do flush):
+  // apaga UMA linha por vez, preferindo uma que esteja zerada, pra nunca levar
+  // junto a linha que tem os valores preenchidos. Antes a exclusão era recusada
+  // com erro e o diretor ficava sem como tirar a duplicata da tela.
+  // Valores do VT começam na col. G (índice 6) e vão até Valor Total RioCard.
+  const alvo = escolherLinhaParaExcluir_(rows, achadas, 6, 23);
+
+  sheet.deleteRow(alvo + 1);
+  SpreadsheetApp.flush();
+  return { success: true, deleted: true, duplicadasRestantes: achadas.length - 1 };
+}
+
+// Entre as linhas com a mesma chave, escolhe qual apagar: a última que estiver
+// sem nenhum valor preenchido; se todas tiverem valores, a última da planilha.
+// rows = matriz crua; achadas = índices (base 0) das linhas com a mesma chave;
+// ini/n = primeira coluna de valores e quantas são.
+function escolherLinhaParaExcluir_(rows, achadas, ini, n) {
+  for (let j = achadas.length - 1; j >= 0; j--) {
+    const vals = rows[achadas[j]].slice(ini, ini + n);
+    const zerada = vals.every(function(v) { return !v || Number(v) === 0; });
+    if (zerada) return achadas[j];
+  }
+  return achadas[achadas.length - 1];
 }
 
 // =============================================================================
